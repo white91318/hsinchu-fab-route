@@ -31,26 +31,18 @@ npm run build  # production build
 - `src/hooks/useLiveTraffic.ts` — 每 2 分鐘輪詢 `/api/live-traffic`,失敗時保留上次成功的資料與時間戳
 - `src/components/` — 地圖、時間軸控制、路段標籤、建議路線卡、即時資料狀態列等 UI 元件
 
-## 即時資料(國道路段)
+## 即時資料 — 目前狀態:全部退回模擬(已實測,非推測)
 
-`src/lib/live/freewayClient.ts` 會嘗試向高速公路局「交通資料庫」(tisvcloud.freeway.gov.tw,免驗證、免費使用)抓取即時路況 XML,依交流道關鍵字比對到 `N1_NORTH`、`N1_MID`、`N1_SOUTH`、`N3_ZHUNAN` 這 4 個國道路段,覆蓋掉模擬基準線;抓不到或比對不到時,該路段自動退回模擬值,不會顯示空白或假資料。
+`src/lib/live/freewayClient.ts`(國道 4 路段)與 `src/lib/live/hccgClient.ts`(市區診斷查詢)都會嘗試連上公開資料源,失敗時自動退回模擬值,不會顯示空白或假資料——但**目前確實抓不到任何真實資料**,而且這不是「網址猜錯」的問題:
 
-`src/lib/live/hccgClient.ts` 是新竹市開放資料平臺的**診斷用**查詢(CKAN `package_search`),只回報有哪些疑似路況相關資料集,目前不會拿它覆蓋任何路段——因為 PRD §7 本來就把市區/園區即時官方資料標為「待確認」,目前沒有已知可用的即時資料集。
+- 部署到 Vercel 後,實際用一支探測用的 API route 從**兩個不同機房**(美東 iad1、東京 hnd1)直接打 `tisvcloud.freeway.gov.tw`、`opendata.hccg.gov.tw`、`odws.hccg.gov.tw`(新竹市開放資料實際檔案主機)、`dep-traffic.hccg.gov.tw`(施工公告頁面),結果:
+  - 前三個網域:**兩個機房都連線失敗**(`fetch failed`,連線層級失敗,不是 404),看起來是這些政府網域直接擋掉雲端/機房 IP 網段,跟地理位置無關。
+  - `dep-traffic.hccg.gov.tw` 連得到,但擋在 Cloudflare 的 JS 驗證關卡前(伺服器端 fetch 沒有瀏覽器可以過關),抓不到實際公告內容。
+- 透過政府資料開放平臺(data.gov.tw / data.nat.gov.tw,這兩個網域可以連)查到「高速公路發布路段即時路況資料」(datasetId 157203)的官方 metadata,確認**真正的資料來源其實是 TDX**(`https://tdx.transportdata.tw/api/basic/v2/Road/Traffic/Live/Freeway`),且**必須先在 TDX 平台註冊並建立 API Key**——沒有 TDX 憑證就是拿不到,不是網址問題。
 
-### ⚠️ 尚未實際連線驗證
+**結論:在目前的 Vercel 部署架構下,免驗證管道走不通。要接上真國道即時路況,唯一路是去 TDX 註冊拿 API Key**,改用 OAuth2 client-credentials 呼叫上面那支 TDX API(`freewayClient.ts` 需要改寫呼叫方式,現在打的 tisvcloud 網址留著只是讓程式優雅降級,不代表它們可行)。市區路況與施工公告目前沒有找到任何可從這個架構存取的替代方案。
 
-寫這段程式碼時,執行環境的網路出口白名單擋掉了 `tisvcloud.freeway.gov.tw`、`opendata.hccg.gov.tw`、`tdx.transportdata.tw`,所以**下列細節是根據公開文件與間接資料推斷,並未實際打過一次真實 API**:
-
-- `src/lib/live/freewayConfig.ts` 裡 `FREEWAY_LIVE_URL_CANDIDATES` 的確切檔名(已確認的只有:資料免驗證、根目錄放即時檔案、遵循「即時路況資料標準 v2」、欄位含 `SectionID`/`TravelTime`/`TravelSpeed`)
-- 即時資料裡實際會出現哪些欄位可以拿來比對路段名稱(`freewayClient.ts` 的 `NAME_KEYS` 是猜的候選欄位清單)
-- `opendata.hccg.gov.tw` 是否真的是 CKAN 架構
-
-部署到能連上網路的環境後,**請務必**:
-1. 直接瀏覽 `https://tisvcloud.freeway.gov.tw/` 找到真正的即時路況檔名,更新 `freewayConfig.ts`
-2. 呼叫一次 `/api/live-traffic`,確認 `freeway.status` 是 `"ok"` 且 `readings` 有抓到 4 個國道路段
-3. 視需要調整 `FREEWAY_SEGMENT_MATCHERS` 的關鍵字比對邏輯
-
-程式碼本身已經處理好「來源打不通、格式不對、比對不到」的每一種失敗情況(見 `freewayClient.ts` 的 try/catch 與 `SourceHealth`),所以就算上面這些細節猜錯,應用程式也只會安靜地退回模擬路況並在畫面上誠實標示,不會壞掉。
+程式碼本身已經處理好「來源打不通、格式不對、比對不到」的每一種失敗情況(見 `freewayClient.ts`/`hccgClient.ts` 的 try/catch 與 `SourceHealth`),所以這個部署會一直安靜地顯示模擬路況並在畫面上誠實標示,不會壞掉——只是目前沒有一段路是真的即時資料。
 
 ## 已知限制
 

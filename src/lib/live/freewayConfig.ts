@@ -2,26 +2,26 @@
  * Freeway Bureau (交通部高速公路局) live traffic feed — configuration.
  *
  * ============================================================================
- * UNVERIFIED — READ BEFORE RELYING ON THIS IN PRODUCTION
+ * CONFIRMED UNREACHABLE FROM THIS DEPLOYMENT — see README "即時資料" section
  * ============================================================================
- * The sandbox this integration was written in has its network egress blocked
- * for tisvcloud.freeway.gov.tw, so none of the URLs below have been hit
- * successfully. What IS confirmed (via public documentation / third-party
- * write-ups, not a live call):
- *   - The feed requires no API key/auth, and is free to poll (min. 40s
- *     between requests to be a good citizen).
- *   - It follows MOTC's "即時路況資料標準 v2.0/2.1" — live records carry
- *     `SectionID`, `TravelTime` (seconds) and `TravelSpeed` (km/h).
- *   - Live (current) files sit at the site root; historical snapshots are
- *     archived under `/history/...`. A root-level file `cctv_value.xml.gz`
- *     is confirmed to exist, which is the basis for guessing the section
- *     travel-time file follows the same `..._value.xml.gz` convention below.
- * What is a GUESS: the exact filename for the live section/travel-time feed.
+ * Tested live from the production deployment itself (not a sandbox
+ * limitation): a probe route hit tisvcloud.freeway.gov.tw and
+ * *.hccg.gov.tw from two different Vercel regions (iad1/US-East and
+ * hnd1/Tokyo) and got "fetch failed" (connection-level failure, not a 404)
+ * every time, from both regions. These domains appear to block cloud/
+ * datacenter IP ranges outright, independent of geography.
  *
- * Before trusting this in production: open https://tisvcloud.freeway.gov.tw/
- * in a browser from a network that can reach it, find the actual live
- * section/travel-time filename, and update FREEWAY_LIVE_URL_CANDIDATES
- * below (put the confirmed one first).
+ * The authoritative source for this exact dataset — confirmed via its
+ * official metadata on the national open-data platform
+ * (data.nat.gov.tw/dataset/157203, "高速公路發布路段即時路況資料") — is
+ * actually TDX (`https://tdx.transportdata.tw/api/basic/v2/Road/Traffic/Live/Freeway`),
+ * which requires a free TDX account + API key. There is no way to get this
+ * data without one; the URLs below are kept only so the app degrades
+ * gracefully (see freewayClient.ts) rather than because they might work.
+ *
+ * To actually enable this: get a TDX API key (https://tdx.transportdata.tw/),
+ * switch freewayClient.ts to call the TDX endpoint above with an OAuth2
+ * client-credentials token instead of these tisvcloud URLs.
  * ============================================================================
  */
 export const FREEWAY_LIVE_URL_CANDIDATES = [

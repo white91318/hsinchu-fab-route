@@ -22,6 +22,8 @@ export interface CommuteActions {
   setMinutes: (minutes: number) => void;
   setWeekday: (weekday: boolean) => void;
   selectNode: (id: NodeId) => void;
+  setOriginId: (id: NodeId | null) => void;
+  setDestId: (id: NodeId | null) => void;
   setActiveSeg: (id: SegmentId | null) => void;
   setPlaying: (playing: boolean) => void;
   jumpToNow: () => void;
@@ -71,6 +73,12 @@ export function useCommuteState(): CommuteState & CommuteActions {
     }
   }, []);
 
+  // Direct setters for the <select>-based picker — unlike selectNode (which
+  // toggles, for tapping the same map station twice), choosing a new option
+  // in a dropdown always means "set it to this", including back to empty.
+  const setOriginId = useCallback((id: NodeId | null) => setOrigin(id), []);
+  const setDestId = useCallback((id: NodeId | null) => setDest(id), []);
+
   const jumpToNow = useCallback(() => {
     setPlayingState(false);
     setMinutes(nowMinutes());
@@ -92,6 +100,8 @@ export function useCommuteState(): CommuteState & CommuteActions {
     setMinutes,
     setWeekday,
     selectNode,
+    setOriginId,
+    setDestId,
     setActiveSeg,
     setPlaying,
     jumpToNow,

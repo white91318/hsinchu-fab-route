@@ -1,17 +1,13 @@
 "use client";
 
 import { useMemo } from "react";
-import { InfoPanel } from "@/components/InfoPanel";
 import { LiveDataStatus } from "@/components/LiveDataStatus";
-import { MapLegend } from "@/components/MapLegend";
+import { NetworkMapSection } from "@/components/NetworkMapSection";
 import { RouteResults } from "@/components/RouteResults";
-import { SegmentChips } from "@/components/SegmentChips";
-import { SelectionPills } from "@/components/SelectionPills";
+import { RouteSelectors } from "@/components/RouteSelectors";
 import { TimeControls } from "@/components/TimeControls";
-import { TrafficMap } from "@/components/TrafficMap";
 import { useCommuteState } from "@/hooks/useCommuteState";
 import { useLiveTraffic } from "@/hooks/useLiveTraffic";
-import { NODES } from "@/lib/data/nodes";
 import { findPaths } from "@/lib/routing/pathfinding";
 import { selectTopRoutes } from "@/lib/routing/selectRoutes";
 import { computeSegmentStatuses } from "@/lib/traffic/model";
@@ -30,6 +26,8 @@ export default function Home() {
     setMinutes,
     setWeekday,
     selectNode,
+    setOriginId,
+    setDestId,
     setActiveSeg,
     setPlaying,
     jumpToNow,
@@ -69,12 +67,33 @@ export default function Home() {
       <main>
         <div className="lede">
           <h1 className="display">今天走哪條路比較好?</h1>
-          <p>拖曳時間軸看一整天的路況怎麼變化,直接點地圖上的出發地和目的地,系統會在路網裡找路線並即時比較。</p>
+          <p>選出發地和目的地,系統會在路網裡找路線並即時比較;也可以拖曳時間軸看一整天的路況怎麼變化。</p>
         </div>
 
         <LiveDataStatus liveTraffic={liveTraffic} liveCount={liveSegmentCount} />
 
         <div className="card">
+          <RouteSelectors
+            originId={origin}
+            destId={dest}
+            onOriginChange={setOriginId}
+            onDestChange={setDestId}
+            onReset={reset}
+          />
+        </div>
+
+        <RouteResults
+          hasSelection={Boolean(origin && dest)}
+          noRouteFound={noRouteFound}
+          best={best}
+          other={other}
+        />
+
+        {/* Time scrubbing is a "what if" tool, not the main question — it sits
+            below the answer so the recommendation lands above the fold on a
+            phone. Defaults to now, which is what most commuters want. */}
+        <div className="card">
+          <p className="net-hint">想看其他時段?拖曳時間軸看一整天的路況怎麼變化。</p>
           <TimeControls
             minutes={minutes}
             weekday={weekday}
@@ -84,39 +103,17 @@ export default function Home() {
             onPlayingChange={setPlaying}
             onNow={jumpToNow}
           />
-          <SelectionPills
-            originLabel={origin ? NODES[origin].label : null}
-            destLabel={dest ? NODES[dest].label : null}
-            onReset={reset}
-          />
         </div>
 
-        <div className="card">
-          <p className="net-hint">
-            點站點選出發地／目的地(再點一次取消);點路線或下面的路段標籤看即時路況。畫法比照捷運路線圖:只有直線和直角轉彎,站點方位依新竹地區實際相對地理位置排列(國道交流道座標取自公路局資料),距離則經過壓縮,不是等比例地圖。
-          </p>
-          <figure>
-            <TrafficMap
-              statuses={statuses}
-              origin={origin}
-              dest={dest}
-              activeSeg={activeSeg}
-              bestEdgeIds={best?.edgeIds ?? []}
-              altEdgeIds={other?.edgeIds ?? []}
-              onSelectNode={selectNode}
-              onSelectSegment={setActiveSeg}
-            />
-          </figure>
-          <MapLegend />
-          <InfoPanel activeSeg={activeSeg} statuses={statuses} />
-          <SegmentChips statuses={statuses} activeSeg={activeSeg} onSelect={setActiveSeg} />
-        </div>
-
-        <RouteResults
-          hasSelection={Boolean(origin && dest)}
-          noRouteFound={noRouteFound}
-          best={best}
-          other={other}
+        <NetworkMapSection
+          statuses={statuses}
+          origin={origin}
+          dest={dest}
+          activeSeg={activeSeg}
+          bestEdgeIds={best?.edgeIds ?? []}
+          altEdgeIds={other?.edgeIds ?? []}
+          onSelectNode={selectNode}
+          onSelectSegment={setActiveSeg}
         />
 
         <div className="disclaimer">

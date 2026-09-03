@@ -184,8 +184,8 @@ main {
   cursor: pointer;
 }
 .icon-btn {
-  width: 34px;
-  height: 34px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   border: 1px solid var(--line);
   background: var(--page);
@@ -222,7 +222,8 @@ main {
   flex-wrap: wrap;
 }
 .seg button {
-  padding: 7px 12px;
+  padding: 7px 14px;
+  min-height: 44px;
   border: 1px solid var(--line);
   border-radius: 20px;
   background: var(--page);
@@ -241,46 +242,81 @@ main {
   outline-offset: 2px;
 }
 
-.selection-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-}
-.sel-pill {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 13px;
-  padding: 7px 12px;
-  border-radius: 20px;
-  background: var(--page);
-  border: 1px solid var(--line);
-  color: var(--ink-soft);
-}
-.sel-pill .k {
-  color: var(--muted);
-}
-.sel-pill .v {
-  font-weight: 700;
-  color: var(--ink);
-}
-.sel-pill.empty .v {
-  color: var(--muted);
-  font-weight: 500;
-  font-style: normal;
-}
 .reset-btn {
   background: none;
   border: 1px solid var(--line);
   color: var(--muted);
   border-radius: 20px;
-  padding: 6px 12px;
+  padding: 6px 14px;
+  min-height: 44px;
   font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
 }
 .reset-btn:focus-visible {
+  outline: 2px solid var(--steel);
+  outline-offset: 2px;
+}
+
+/* ---------- route selectors (primary mobile input) ---------- */
+.selectors-row {
+  align-items: stretch;
+}
+.select-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1 1 240px;
+  min-width: 160px;
+}
+/* Stretch is right for the two select columns, wrong for the button — keep it
+   at its natural height, pushed to the end of whichever row it lands on. */
+.selectors-row .reset-btn {
+  align-self: flex-end;
+  margin-left: auto;
+}
+.select-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.node-select {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 15px;
+}
+.node-select:focus-visible {
+  outline: 2px solid var(--steel);
+  outline-offset: 2px;
+}
+
+/* ---------- collapsible map section ---------- */
+.map-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 2px;
+  border: none;
+  background: none;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: left;
+}
+.map-toggle-hint {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.map-toggle:focus-visible {
   outline: 2px solid var(--steel);
   outline-offset: 2px;
 }
@@ -406,11 +442,23 @@ figure svg {
   gap: 8px;
   margin-top: 14px;
 }
+@media (max-width: 759px) {
+  .chip-grid {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .chip-grid .seg-chip {
+    flex: none;
+  }
+}
 .seg-chip {
   display: flex;
   align-items: center;
   gap: 7px;
   padding: 7px 11px;
+  min-height: 44px;
   border-radius: 20px;
   border: 1px solid var(--line);
   background: var(--page);

@@ -27,6 +27,8 @@ export interface SegmentDef {
 
 export type SegmentId = string;
 
+export type StatusSource = "simulated" | "live";
+
 export interface SegmentStatus {
   id: SegmentId;
   name: string;
@@ -34,6 +36,9 @@ export interface SegmentStatus {
   level: CongestionLevel;
   reason: string;
   minutes: number;
+  source: StatusSource;
+  /** ISO timestamp the reading reflects — only set when source is "live". */
+  asOf?: string;
 }
 
 export type NodeType = "origin" | "dest" | "junction";

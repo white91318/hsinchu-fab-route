@@ -1,24 +1,24 @@
-import { segStatus } from "@/lib/traffic/model";
 import type {
   AdjacencyEntry,
   ComputedPath,
   DisplaySegment,
+  SegmentId,
   SegmentStatus,
 } from "@/lib/traffic/types";
 
 const LEVEL_RANK = { good: 0, warning: 1, critical: 2 };
 
 /**
- * Evaluates one candidate path at a given time. Consecutive edges on the same
- * named road (e.g. 力行一路 → 力行二路 → 力行六路, all "力行路") are merged
- * into a single display leg with summed minutes (PRD §6.1, §5.1 AC).
+ * Evaluates one candidate path against a precomputed segment→status map.
+ * Consecutive edges on the same named road (e.g. 力行一路 → 力行二路 →
+ * 力行六路, all "力行路") are merged into a single display leg with summed
+ * minutes (PRD §6.1, §5.1 AC).
  */
 export function computePath(
   path: AdjacencyEntry[],
-  hour: number,
-  weekday: boolean,
+  statuses: Record<SegmentId, SegmentStatus>,
 ): ComputedPath {
-  const segs: SegmentStatus[] = path.map((e) => segStatus(e.seg, hour, weekday));
+  const segs: SegmentStatus[] = path.map((e) => statuses[e.seg]);
   const total = Math.round(segs.reduce((s, x) => s + x.minutes, 0));
   const worst = segs.reduce(
     (a, b) => ((b.minutes - b.base) > (a.minutes - a.base) ? b : a),

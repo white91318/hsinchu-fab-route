@@ -5,12 +5,11 @@ import { EDGES } from "@/lib/data/edges";
 import { NODES } from "@/lib/data/nodes";
 import { SEGMENTS } from "@/lib/data/segments";
 import { labelPos, pathD } from "@/lib/diagram/geometry";
-import { levelVar, segStatus } from "@/lib/traffic/model";
-import type { NodeDef, NodeId, SegmentId } from "@/lib/traffic/types";
+import { levelVar } from "@/lib/traffic/model";
+import type { NodeDef, NodeId, SegmentId, SegmentStatus } from "@/lib/traffic/types";
 
 interface TrafficMapProps {
-  hour: number;
-  weekday: boolean;
+  statuses: Record<SegmentId, SegmentStatus>;
   origin: NodeId | null;
   dest: NodeId | null;
   activeSeg: SegmentId | null;
@@ -30,8 +29,7 @@ function activateOnKey(handler: () => void) {
 }
 
 export function TrafficMap({
-  hour,
-  weekday,
+  statuses,
   origin,
   dest,
   activeSeg,
@@ -58,7 +56,7 @@ export function TrafficMap({
 
       <g id="edgeLayer">
         {EDGES.map((edge) => {
-          const status = segStatus(edge.seg, hour, weekday);
+          const status = statuses[edge.seg];
           const isBest = bestEdgeIds.includes(edge.id);
           const isAlt = altEdgeIds.includes(edge.id);
           const d = pathD(edge.pts, 14);

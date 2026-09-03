@@ -1,19 +1,18 @@
 import { SEGMENTS } from "@/lib/data/segments";
-import { LEVEL_LABEL, levelVar, segStatus } from "@/lib/traffic/model";
-import type { SegmentId } from "@/lib/traffic/types";
+import { LEVEL_LABEL, levelVar } from "@/lib/traffic/model";
+import type { SegmentId, SegmentStatus } from "@/lib/traffic/types";
 
 interface SegmentChipsProps {
-  hour: number;
-  weekday: boolean;
+  statuses: Record<SegmentId, SegmentStatus>;
   activeSeg: SegmentId | null;
   onSelect: (id: SegmentId) => void;
 }
 
-export function SegmentChips({ hour, weekday, activeSeg, onSelect }: SegmentChipsProps) {
+export function SegmentChips({ statuses, activeSeg, onSelect }: SegmentChipsProps) {
   return (
     <div className="chip-grid">
       {Object.keys(SEGMENTS).map((id) => {
-        const s = segStatus(id, hour, weekday);
+        const s = statuses[id];
         return (
           <button
             key={id}
@@ -25,6 +24,9 @@ export function SegmentChips({ hour, weekday, activeSeg, onSelect }: SegmentChip
             <span className="sw" style={{ background: levelVar(s.level) }} />
             <span className="lbl">
               {s.name} · {LEVEL_LABEL[s.level]}
+              {s.source === "live" && (
+                <span className="live-dot" title="即時資料" aria-label="即時資料" />
+              )}
             </span>
           </button>
         );

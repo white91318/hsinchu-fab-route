@@ -1,5 +1,5 @@
 import { computePath } from "@/lib/routing/computePath";
-import type { AdjacencyEntry, ComputedPath } from "@/lib/traffic/types";
+import type { AdjacencyEntry, ComputedPath, SegmentId, SegmentStatus } from "@/lib/traffic/types";
 
 export interface RouteSelection {
   best?: ComputedPath;
@@ -16,12 +16,11 @@ export interface RouteSelection {
  */
 export function selectTopRoutes(
   rawPaths: AdjacencyEntry[][],
-  hour: number,
-  weekday: boolean,
+  statuses: Record<SegmentId, SegmentStatus>,
 ): RouteSelection {
   if (!rawPaths.length) return { noRouteFound: true };
 
-  const computed = rawPaths.map((p) => computePath(p, hour, weekday));
+  const computed = rawPaths.map((p) => computePath(p, statuses));
   computed.sort((a, b) => a.total - b.total);
 
   const seen = new Set<string>();

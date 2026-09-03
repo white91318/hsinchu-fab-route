@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { InfoPanel } from "@/components/InfoPanel";
+import { LiveDataStatus } from "@/components/LiveDataStatus";
 import { MapLegend } from "@/components/MapLegend";
 import { RouteResults } from "@/components/RouteResults";
 import { SegmentChips } from "@/components/SegmentChips";
@@ -9,10 +10,12 @@ import { SelectionPills } from "@/components/SelectionPills";
 import { TimeControls } from "@/components/TimeControls";
 import { TrafficMap } from "@/components/TrafficMap";
 import { useCommuteState } from "@/hooks/useCommuteState";
+import { useLiveTraffic } from "@/hooks/useLiveTraffic";
 import { NODES } from "@/lib/data/nodes";
 import { findPaths } from "@/lib/routing/pathfinding";
 import { selectTopRoutes } from "@/lib/routing/selectRoutes";
-import { hourFloat } from "@/lib/traffic/time";
+import { computeSegmentStatuses } from "@/lib/traffic/model";
+import { hourFloat, nowMinutes } from "@/lib/traffic/time";
 
 const MAX_PATH_LENGTH = 6;
 
@@ -33,13 +36,25 @@ export default function Home() {
     reset,
   } = useCommuteState();
 
+  const liveTraffic = useLiveTraffic();
   const hour = hourFloat(minutes);
+  // Live readings only reflect the actual present — applying them while the
+  // user is scrubbing the time slider to a different moment would be
+  // misleading, so they're only overlaid when the slider sits on "now".
+  const isCurrentlyNow = Math.abs(minutes - nowMinutes()) < 3;
+
+  const statuses = useMemo(
+    () => computeSegmentStatuses(hour, weekday, isCurrentlyNow ? liveTraffic.readings : {}),
+    [hour, weekday, isCurrentlyNow, liveTraffic.readings],
+  );
 
   const { best, other, noRouteFound } = useMemo(() => {
     if (!origin || !dest) return { noRouteFound: false };
     const rawPaths = findPaths(origin, dest, MAX_PATH_LENGTH);
-    return selectTopRoutes(rawPaths, hour, weekday);
-  }, [origin, dest, hour, weekday]);
+    return selectTopRoutes(rawPaths, statuses);
+  }, [origin, dest, statuses]);
+
+  const liveSegmentCount = Object.values(statuses).filter((s) => s.source === "live").length;
 
   return (
     <>
@@ -56,6 +71,8 @@ export default function Home() {
           <h1 className="display">今天走哪條路比較好?</h1>
           <p>拖曳時間軸看一整天的路況怎麼變化,直接點地圖上的出發地和目的地,系統會在路網裡找路線並即時比較。</p>
         </div>
+
+        <LiveDataStatus liveTraffic={liveTraffic} liveCount={liveSegmentCount} />
 
         <div className="card">
           <TimeControls
@@ -80,8 +97,7 @@ export default function Home() {
           </p>
           <figure>
             <TrafficMap
-              hour={hour}
-              weekday={weekday}
+              statuses={statuses}
               origin={origin}
               dest={dest}
               activeSeg={activeSeg}
@@ -92,8 +108,8 @@ export default function Home() {
             />
           </figure>
           <MapLegend />
-          <InfoPanel activeSeg={activeSeg} hour={hour} weekday={weekday} />
-          <SegmentChips hour={hour} weekday={weekday} activeSeg={activeSeg} onSelect={setActiveSeg} />
+          <InfoPanel activeSeg={activeSeg} statuses={statuses} />
+          <SegmentChips statuses={statuses} activeSeg={activeSeg} onSelect={setActiveSeg} />
         </div>
 
         <RouteResults
@@ -104,7 +120,7 @@ export default function Home() {
         />
 
         <div className="disclaimer">
-          這是功能原型:路況邏輯用「時間函式」模擬一整天的尖峰規律(含施工示範情境),尚未串接即時路況、道路施工開放資料或大廠實際班別時間。正式版規劃會接入公路局路況資料與使用者即時回報。
+          國道 1 號／3 號路段(頭前溪以北、竹北—新竹、新竹—系統交流道、竹南段)會嘗試向高速公路局即時路況資料抓取實際車速與旅行時間;抓不到時自動退回模擬值,並在上方狀態列與路段細節誠實標示來源。其餘市區與園區路段、班別交接尖峰,目前仍是「時間函式」模擬(含施工示範情境),尚未有可用的即時官方資料(見 PRD §7)。
         </div>
       </main>
     </>

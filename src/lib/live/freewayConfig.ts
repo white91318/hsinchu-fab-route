@@ -15,9 +15,10 @@
  * official metadata on the national open-data platform
  * (data.nat.gov.tw/dataset/157203, "高速公路發布路段即時路況資料") — is
  * actually TDX (`https://tdx.transportdata.tw/api/basic/v2/Road/Traffic/Live/Freeway`),
- * which requires a free TDX account + API key. There is no way to get this
- * data without one; the URLs below are kept only so the app degrades
- * gracefully (see freewayClient.ts) rather than because they might work.
+ * which requires a TDX account + API key. The key itself is free (register
+ * with an email; roughly a 3-business-day review), but there is no way to
+ * get this data without one — the URLs below are kept only so the app
+ * degrades gracefully (see freewayClient.ts), not because they might work.
  *
  * To actually enable this: get a TDX API key (https://tdx.transportdata.tw/),
  * switch freewayClient.ts to call the TDX endpoint above with an OAuth2

@@ -125,32 +125,226 @@ input {
   background: repeating-linear-gradient(135deg, var(--accent) 0 22px, var(--ink) 22px 26px);
 }
 
-main {
-  max-width: 1040px;
-  margin: 0 auto;
-  padding: 26px 20px 60px;
+/* ---------- app shell: map-first, panel over/beside it ---------- */
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  overflow: hidden;
 }
-.lede {
-  margin: 0 0 22px;
+.app-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
 }
-.lede h1 {
-  margin: 0 0 6px;
-  font-size: clamp(24px, 3.6vw, 32px);
+
+/* ---------- map pane ---------- */
+.map-pane {
+  position: absolute;
+  inset: 0;
+  background: var(--page);
 }
-.lede p {
-  margin: 0;
+.map-scroll {
+  height: 100%;
+  overflow: auto;
+  /* Let the browser pan and pinch-zoom natively once the canvas overflows. */
+  touch-action: pan-x pan-y pinch-zoom;
+  -webkit-overflow-scrolling: touch;
+}
+.map-canvas {
+  /* Width is set inline by the zoom control; height follows the viewBox. */
+  min-width: 100%;
+  min-height: 100%;
+  display: flex;
+  justify-content: center;
+  padding: 12px;
+}
+.map-controls {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 2;
+}
+.map-controls .icon-btn {
+  background: var(--surface);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+}
+.map-controls .icon-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.map-legend-float {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 1;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  max-width: calc(100% - 90px);
+}
+.map-legend-float .map-legend {
+  margin-top: 0;
+}
+/* On a phone the map is the whole view, so the key shrinks to the one thing
+   that isn't self-evident from the shapes: what the line colours mean. */
+@media (max-width: 899px) {
+  .map-legend-float {
+    padding: 6px 9px;
+    max-width: calc(100% - 80px);
+  }
+  .map-legend-float .lg:not(:last-child) {
+    display: none;
+  }
+  .map-legend-float .map-legend {
+    font-size: 11px;
+  }
+}
+
+/* ---------- bottom sheet (phone) ---------- */
+.sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  height: calc(var(--sheet-fraction, 0.5) * 100%);
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.16);
+  transition: height 220ms ease;
+}
+.sheet[data-dragging="true"] {
+  transition: none;
+}
+.sheet-handle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 56px;
+  padding: 10px 16px 12px;
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: grab;
+  /* The handle owns the vertical gesture; without this the pane scrolls instead. */
+  touch-action: none;
+}
+.sheet-handle:active {
+  cursor: grabbing;
+}
+.sheet-handle:focus-visible {
+  outline: 2px solid var(--steel);
+  outline-offset: -2px;
+  border-radius: 16px 16px 0 0;
+}
+.sheet-grip {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+  flex: none;
+}
+.sheet-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  gap: 4px 12px;
+  width: 100%;
+  text-align: center;
+}
+.summary-route {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.summary-time {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--accent-ink);
+}
+.summary-hint {
+  font-size: 13.5px;
   color: var(--muted);
-  font-size: 14px;
-  max-width: 66ch;
+}
+.sheet-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 16px 24px;
+}
+.panel-section + .panel-section {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+.panel-heading {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+/* ---------- desktop: two columns, no page scrolling ---------- */
+@media (min-width: 900px) {
+  .app-body {
+    display: grid;
+    grid-template-columns: minmax(380px, 34%) 1fr;
+  }
+  .map-pane {
+    position: relative;
+    inset: auto;
+    grid-column: 2;
+    grid-row: 1;
+    border-left: 1px solid var(--line);
+    min-height: 0;
+  }
+  /* The sheet becomes the left column: no floating, no drag, full height. */
+  .sheet {
+    position: relative;
+    grid-column: 1;
+    grid-row: 1;
+    height: 100%;
+    min-height: 0;
+    border-top: none;
+    border-radius: 0;
+    box-shadow: none;
+    transition: none;
+  }
+  .sheet-handle {
+    display: none;
+  }
+  .sheet-scroll {
+    padding: 20px;
+  }
+  .map-legend-float {
+    max-width: calc(100% - 90px);
+  }
 }
 
 .card {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 14px;
-  padding: 20px;
+  padding: 14px;
   box-shadow: var(--shadow);
-  margin-bottom: 20px;
+  margin-bottom: 14px;
+}
+.panel-section > .card:last-child {
+  margin-bottom: 0;
 }
 
 /* ---------- controls ---------- */
@@ -295,45 +489,20 @@ main {
   outline-offset: 2px;
 }
 
-/* ---------- collapsible map section ---------- */
-.map-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  min-height: 44px;
-  padding: 8px 2px;
-  border: none;
-  background: none;
-  color: var(--ink);
-  font-size: 15px;
-  font-weight: 700;
-  cursor: pointer;
-  text-align: left;
-}
-.map-toggle-hint {
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--muted);
-}
-.map-toggle:focus-visible {
-  outline: 2px solid var(--steel);
-  outline-offset: 2px;
-}
-
 /* ---------- network diagram ---------- */
-.net-hint {
-  font-size: 13px;
-  color: var(--muted);
-  margin: 0 0 14px;
-}
-figure {
-  margin: 0;
-}
-figure svg {
+.map-canvas svg {
   width: 100%;
   height: auto;
   display: block;
+}
+/* At 1x the whole diagram fits the pane (the viewBox letterboxes rather than
+   distorting), so there is nothing to scroll until the user zooms in. The
+   explicit height is what lets the svg's percentage max-height resolve. */
+.map-canvas:not([data-zoomed="true"]) {
+  height: 100%;
+}
+.map-canvas:not([data-zoomed="true"]) svg {
+  max-height: 100%;
 }
 .netnode {
   cursor: pointer;
@@ -557,8 +726,8 @@ figure svg {
   background: var(--ink);
   color: var(--page);
   border-radius: 14px;
-  padding: 22px 22px 20px;
-  margin-bottom: 20px;
+  padding: 18px 18px 16px;
+  margin-bottom: 14px;
   position: relative;
   overflow: hidden;
 }
@@ -613,13 +782,7 @@ figure svg {
 .routes {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 14px;
-  margin-bottom: 20px;
-}
-@media (min-width: 720px) {
-  .routes {
-    grid-template-columns: 1fr 1fr;
-  }
+  gap: 12px;
 }
 .route-card {
   background: var(--surface);
@@ -705,7 +868,7 @@ figure svg {
 }
 
 .disclaimer {
-  margin-top: 4px;
+  margin-top: 18px;
   font-size: 12px;
   color: var(--muted);
   background: var(--surface);

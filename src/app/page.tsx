@@ -1,14 +1,13 @@
 "use client";
 
 import { useMemo } from "react";
-import { ConstructionNotices } from "@/components/ConstructionNotices";
-import { LiveDataStatus } from "@/components/LiveDataStatus";
-import { NetworkMapSection } from "@/components/NetworkMapSection";
-import { RouteResults } from "@/components/RouteResults";
-import { RouteSelectors } from "@/components/RouteSelectors";
-import { TimeControls } from "@/components/TimeControls";
+import { BottomSheet } from "@/components/BottomSheet";
+import { MapPane } from "@/components/MapPane";
+import { RoutePanel } from "@/components/RoutePanel";
 import { useCommuteState } from "@/hooks/useCommuteState";
 import { useLiveTraffic } from "@/hooks/useLiveTraffic";
+import { NODES } from "@/lib/data/nodes";
+import { pathLabel } from "@/lib/routing/computePath";
 import { findPaths } from "@/lib/routing/pathfinding";
 import { selectTopRoutes } from "@/lib/routing/selectRoutes";
 import { computeSegmentStatuses } from "@/lib/traffic/model";
@@ -55,60 +54,60 @@ export default function Home() {
 
   const liveSegmentCount = Object.values(statuses).filter((s) => s.source === "live").length;
 
-  return (
+  // The one line a collapsed sheet must still answer: where to, and how long.
+  const summary = best ? (
     <>
-      <div className="appbar">
+      <span className="summary-route">{pathLabel(best)}</span>
+      <span className="summary-time mono">約 {best.total} 分鐘</span>
+    </>
+  ) : origin || dest ? (
+    <span className="summary-hint">
+      {origin ? NODES[origin].label : "選出發地"} → {dest ? NODES[dest].label : "選目的地"}
+    </span>
+  ) : (
+    <span className="summary-hint">選出發地和目的地,看建議路線</span>
+  );
+
+  const panel = (
+    <RoutePanel
+      origin={origin}
+      dest={dest}
+      onOriginChange={setOriginId}
+      onDestChange={setDestId}
+      onReset={reset}
+      minutes={minutes}
+      weekday={weekday}
+      playing={playing}
+      onMinutesChange={setMinutes}
+      onWeekdayChange={setWeekday}
+      onPlayingChange={setPlaying}
+      onNow={jumpToNow}
+      best={best}
+      other={other}
+      noRouteFound={noRouteFound}
+      statuses={statuses}
+      activeSeg={activeSeg}
+      onSelectSegment={setActiveSeg}
+      liveTraffic={liveTraffic}
+      liveSegmentCount={liveSegmentCount}
+    />
+  );
+
+  return (
+    <div className="app-shell">
+      <header className="appbar">
         <span className="dot" />
         <span className="name">竹科塞車通</span>
         <span className="sub">路況 · 通勤小工具</span>
-        <span className="crumb">功能 / 今天走哪條路</span>
-      </div>
+        <span className="crumb">今天走哪條路</span>
+      </header>
       <div className="stripe" />
 
-      <main>
-        <div className="lede">
-          <h1 className="display">今天走哪條路比較好?</h1>
-          <p>選出發地和目的地,系統會在路網裡找路線並即時比較;也可以拖曳時間軸看一整天的路況怎麼變化。</p>
-        </div>
-
-        <LiveDataStatus liveTraffic={liveTraffic} liveCount={liveSegmentCount} />
-
-        <div className="card">
-          <RouteSelectors
-            originId={origin}
-            destId={dest}
-            onOriginChange={setOriginId}
-            onDestChange={setDestId}
-            onReset={reset}
-          />
-        </div>
-
-        <RouteResults
-          hasSelection={Boolean(origin && dest)}
-          noRouteFound={noRouteFound}
-          best={best}
-          other={other}
-        />
-
-        <ConstructionNotices construction={liveTraffic.construction} />
-
-        {/* Time scrubbing is a "what if" tool, not the main question — it sits
-            below the answer so the recommendation lands above the fold on a
-            phone. Defaults to now, which is what most commuters want. */}
-        <div className="card">
-          <p className="net-hint">想看其他時段?拖曳時間軸看一整天的路況怎麼變化。</p>
-          <TimeControls
-            minutes={minutes}
-            weekday={weekday}
-            playing={playing}
-            onMinutesChange={setMinutes}
-            onWeekdayChange={setWeekday}
-            onPlayingChange={setPlaying}
-            onNow={jumpToNow}
-          />
-        </div>
-
-        <NetworkMapSection
+      {/* One DOM tree for both layouts: on a phone the sheet floats over the
+          map, on a wide screen CSS turns it into the left column. Rendering it
+          once keeps the two in sync and avoids remount-on-resize. */}
+      <main className="app-body">
+        <MapPane
           statuses={statuses}
           origin={origin}
           dest={dest}
@@ -118,11 +117,8 @@ export default function Home() {
           onSelectNode={selectNode}
           onSelectSegment={setActiveSeg}
         />
-
-        <div className="disclaimer">
-          國道 1 號／3 號路段(頭前溪以北、竹北—新竹、新竹—系統交流道、竹南段)會嘗試向高速公路局即時路況資料抓取實際車速與旅行時間;抓不到時自動退回模擬值,並在上方狀態列與路段細節誠實標示來源。其餘市區與園區路段、班別交接尖峰,目前仍是「時間函式」模擬(含施工示範情境),尚未有可用的即時官方資料(見 PRD §7)。
-        </div>
+        <BottomSheet summary={summary}>{panel}</BottomSheet>
       </main>
-    </>
+    </div>
   );
 }

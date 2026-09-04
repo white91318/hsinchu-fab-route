@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "check:parsers": "node --import ./scripts/register-alias.mjs scripts/parser-checks.mjs"
   },
   "dependencies": {
     "fast-xml-parser": "^5.11.1",

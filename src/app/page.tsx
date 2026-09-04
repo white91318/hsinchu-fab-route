@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { ConstructionNotices } from "@/components/ConstructionNotices";
 import { LiveDataStatus } from "@/components/LiveDataStatus";
 import { NetworkMapSection } from "@/components/NetworkMapSection";
 import { RouteResults } from "@/components/RouteResults";
@@ -88,6 +89,8 @@ export default function Home() {
           best={best}
           other={other}
         />
+
+        <ConstructionNotices construction={liveTraffic.construction} />
 
         {/* Time scrubbing is a "what if" tool, not the main question — it sits
             below the answer so the recommendation lands above the fold on a

@@ -435,6 +435,77 @@ figure svg {
 .live-status.is-connecting .dot {
   background: var(--warning-fill);
 }
+.live-status.is-not-configured .dot {
+  background: var(--muted);
+}
+
+/* ---------- construction notices ---------- */
+.notice-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.notice-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+.notice-count {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.notice-list {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.notice-item {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  font-size: 13.5px;
+  padding: 9px 2px;
+  border-top: 1px solid var(--line);
+}
+.notice-item a {
+  color: var(--ink);
+  text-decoration: none;
+  border-bottom: 1px solid var(--line);
+}
+.notice-item a:hover,
+.notice-item a:focus-visible {
+  border-bottom-color: var(--steel);
+}
+.notice-item.is-today a {
+  font-weight: 700;
+}
+.notice-badge {
+  flex: none;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-radius: 10px;
+  padding: 2px 8px;
+}
+.notice-date {
+  flex: none;
+  font-size: 12px;
+  color: var(--muted);
+}
+.notice-source {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.notice-source a {
+  color: var(--muted);
+}
 
 .chip-grid {
   display: flex;

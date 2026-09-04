@@ -43,5 +43,8 @@ export function computePath(
 }
 
 export function pathLabel(r: ComputedPath): string {
-  return r.display.map((s) => s.name.replace(/（.*?）/, "")).join(" → ");
+  // Accept both paren styles: the labels are hand-maintained Chinese text and
+  // half-width parens creep in, which would otherwise silently leave the
+  // qualifier in place (力行路（園區主幹道） instead of 力行路).
+  return r.display.map((s) => s.name.replace(/[（(].*?[）)]/, "")).join(" → ");
 }

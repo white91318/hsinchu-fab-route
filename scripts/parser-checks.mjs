@@ -157,4 +157,35 @@ check("markup we've never seen yields nothing rather than junk", () => {
   assert.deepEqual(notices, []);
 });
 
+
+console.log("Route label shortening");
+
+const { pathLabel } = await import("../src/lib/routing/computePath.ts");
+
+function fakePath(names) {
+  return {
+    segs: [],
+    display: names.map((name, i) => ({ id: `S${i}`, name, level: "good", reason: "", minutes: 1, base: 1 })),
+    total: 1,
+    worst: {},
+    edgeIds: [],
+  };
+}
+
+check("full-width parenthetical is stripped", () => {
+  assert.equal(pathLabel(fakePath(["力行路（園區主幹道）"])), "力行路");
+});
+
+check("half-width parenthetical is stripped too", () => {
+  assert.equal(pathLabel(fakePath(["力行路(園區主幹道)"])), "力行路");
+});
+
+check("a name with no qualifier is left alone", () => {
+  assert.equal(pathLabel(fakePath(["光復路"])), "光復路");
+});
+
+check("legs are joined with an arrow", () => {
+  assert.equal(pathLabel(fakePath(["光復路", "新安路（施工中）"])), "光復路 → 新安路");
+});
+
 console.log(`\n${passed} checks passed.`);

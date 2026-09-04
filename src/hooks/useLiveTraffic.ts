@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { ConstructionResult, LiveSegmentReading, LiveTrafficResult } from "@/lib/live/types";
+import type { WeatherReading } from "@/lib/weather/types";
 import type { SegmentId } from "@/lib/traffic/types";
 
 const POLL_INTERVAL_MS = 120_000;
@@ -15,6 +16,8 @@ export interface LiveTrafficState {
   /** Why the freeway feed isn't live, when it isn't — shown verbatim to the user. */
   reason: string | null;
   construction: ConstructionResult | null;
+  /** Null until the first successful read; a failed poll keeps the last sky. */
+  weather: WeatherReading | null;
 }
 
 const INITIAL_STATE: LiveTrafficState = {
@@ -23,6 +26,7 @@ const INITIAL_STATE: LiveTrafficState = {
   lastUpdated: null,
   reason: null,
   construction: null,
+  weather: null,
 };
 
 /**
@@ -61,6 +65,9 @@ export function useLiveTraffic(): LiveTrafficState {
           lastUpdated: gotReadings ? data.freeway.fetchedAt : prev.lastUpdated,
           reason: data.freeway.status === "ok" ? null : data.freeway.error,
           construction: data.construction,
+          // Keep the sky we already have if this poll couldn't read the weather,
+          // rather than snapping the backdrop back to a default.
+          weather: data.weather.status === "ok" ? data.weather.reading : prev.weather,
         }));
       } catch {
         if (cancelled) return;

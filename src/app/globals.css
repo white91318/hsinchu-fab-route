@@ -144,6 +144,50 @@ input {
   inset: 0;
   background: var(--page);
 }
+/* The canvas sky sits behind everything else in the pane. */
+.weather-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  z-index: 0;
+}
+
+/* Each sky gets its own readable ink, set here rather than from the theme
+   tokens: the map pane becomes a self-contained scene, so a bright sky can't
+   end up carrying light text (or a dark one, dark text) in either theme.
+   TrafficMap draws strokes and labels in currentColor and fills nodes with
+   --surface, so overriding just those two re-tunes the whole diagram. */
+.map-pane[data-weather] .map-scroll {
+  position: relative;
+  z-index: 1;
+}
+.map-pane[data-weather="rain"] {
+  color: #eef4f9;
+  --surface: #26313b;
+  --line: #46586a;
+}
+.map-pane[data-weather="cloudy"] {
+  color: #1b2228;
+  --surface: #f4f7f9;
+}
+.map-pane[data-weather="clear"] {
+  color: #1c1b18;
+  --surface: #fffdf6;
+}
+/* The junction capsules and node labels read against their own fill, so the
+   floating chrome needs the page's normal surface, not the scene's. */
+.map-pane[data-weather] .map-controls .icon-btn,
+.map-pane[data-weather] .map-legend-float {
+  color: var(--ink-soft);
+  background: var(--surface-2, #eae5d6);
+}
+.map-pane[data-weather] .map-legend-float {
+  background: color-mix(in srgb, var(--page) 90%, transparent);
+  border-color: var(--line);
+}
+
 .map-scroll {
   height: 100%;
   overflow: auto;

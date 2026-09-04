@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { MapLegend } from "@/components/MapLegend";
 import { TrafficMap } from "@/components/TrafficMap";
+import { WeatherBackdrop } from "@/components/WeatherBackdrop";
 import type { NodeId, SegmentId, SegmentStatus } from "@/lib/traffic/types";
+import type { WeatherState } from "@/lib/weather/types";
 
 const ZOOM_STEPS = [1, 1.5, 2, 3] as const;
 
@@ -16,6 +18,8 @@ interface MapPaneProps {
   altEdgeIds: string[];
   onSelectNode: (id: NodeId) => void;
   onSelectSegment: (id: SegmentId) => void;
+  /** Null before the first weather read — the map then sits on the plain page ground. */
+  weather: WeatherState | null;
 }
 
 /**
@@ -33,12 +37,14 @@ export function MapPane({
   altEdgeIds,
   onSelectNode,
   onSelectSegment,
+  weather,
 }: MapPaneProps) {
   const [zoomIndex, setZoomIndex] = useState(0);
   const zoom = ZOOM_STEPS[zoomIndex];
 
   return (
-    <div className="map-pane">
+    <div className="map-pane" data-weather={weather ?? undefined}>
+      {weather && <WeatherBackdrop state={weather} />}
       <div className="map-scroll">
         <div
           className="map-canvas"

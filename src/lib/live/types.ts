@@ -1,4 +1,5 @@
 import type { SegmentId } from "@/lib/traffic/types";
+import type { WeatherResult } from "@/lib/weather/types";
 
 export interface LiveSegmentReading {
   segmentId: SegmentId;
@@ -49,4 +50,5 @@ export interface LiveTrafficResult {
   readings: LiveSegmentReading[];
   freeway: SourceHealth;
   construction: ConstructionResult;
+  weather: WeatherResult;
 }

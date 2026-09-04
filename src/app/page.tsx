@@ -116,6 +116,7 @@ export default function Home() {
           altEdgeIds={other?.edgeIds ?? []}
           onSelectNode={selectNode}
           onSelectSegment={setActiveSeg}
+          weather={liveTraffic.weather?.state ?? null}
         />
         <BottomSheet summary={summary}>{panel}</BottomSheet>
       </main>

@@ -188,4 +188,61 @@ check("legs are joined with an arrow", () => {
   assert.equal(pathLabel(fakePath(["光復路", "新安路（施工中）"])), "光復路 → 新安路");
 });
 
+console.log("Weather state mapping");
+
+const { stateFromWmoCode, readingFromPayload } = await import("../src/lib/weather/openMeteo.ts");
+
+check("drizzle / rain / showers / thunderstorm are all rain", () => {
+  for (const code of [51, 55, 61, 65, 80, 82, 95, 99]) {
+    assert.equal(stateFromWmoCode(code), "rain", `code ${code}`);
+  }
+});
+
+check("snow counts as rain (something is falling)", () => {
+  for (const code of [71, 75, 85, 86]) {
+    assert.equal(stateFromWmoCode(code), "rain", `code ${code}`);
+  }
+});
+
+check("clear and partly cloudy are clear", () => {
+  for (const code of [0, 1, 2]) {
+    assert.equal(stateFromWmoCode(code), "clear", `code ${code}`);
+  }
+});
+
+check("overcast and fog are cloudy", () => {
+  for (const code of [3, 45, 48]) {
+    assert.equal(stateFromWmoCode(code), "cloudy", `code ${code}`);
+  }
+});
+
+check("an unknown code falls back to cloudy, not to sun or rain", () => {
+  assert.equal(stateFromWmoCode(4), "cloudy");
+  assert.equal(stateFromWmoCode(-1), "cloudy");
+});
+
+check("the real payload we measured maps to rain", () => {
+  // Captured from Open-Meteo for Hsinchu at 2026-09-04T13:00 (Asia/Taipei).
+  const payload = {
+    current: { time: "2026-09-04T13:00", temperature_2m: 27.4, precipitation: 0.1, weather_code: 51, is_day: 1 },
+  };
+  const reading = readingFromPayload(payload, "2026-09-04T05:00:00.000Z");
+  assert.equal(reading.state, "rain");
+  assert.equal(reading.description, "毛毛雨");
+  assert.equal(reading.temperatureC, 27.4);
+  assert.equal(reading.isDay, true);
+  assert.equal(reading.observedAt, "2026-09-04T13:00");
+});
+
+check("a payload with no weather code yields no reading", () => {
+  assert.equal(readingFromPayload({ current: { temperature_2m: 27 } }, "t"), null);
+  assert.equal(readingFromPayload({}, "t"), null);
+  assert.equal(readingFromPayload(null, "t"), null);
+});
+
+check("is_day 0 is night", () => {
+  const r = readingFromPayload({ current: { weather_code: 0, is_day: 0 } }, "t");
+  assert.equal(r.isDay, false);
+});
+
 console.log(`\n${passed} checks passed.`);

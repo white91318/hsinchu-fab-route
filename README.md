@@ -28,6 +28,8 @@ npm run check:parsers  # 即時資料解析器檢查(不需網路)
 - `src/lib/diagram/` — 捷運圖式 SVG 幾何工具(直角轉彎路徑、標籤定位)
 - `src/lib/live/tdx/` — TDX 客戶端:OAuth2 token 快取(`auth.ts`)、國道即時路況與路段名稱對應(`freeway.ts`)
 - `src/lib/live/constructionClient.ts` — 新竹市工務處施工公告解析(當日公告優先)
+- `src/lib/weather/` — Open-Meteo 客戶端與 WMO 代碼→天空狀態對應
+- `src/components/WeatherBackdrop.tsx` — canvas 繪製的雨／陰／晴天空
 - `src/app/api/live-traffic/` — 伺服器端代理:聚合即時資料來源,回傳給前端輪詢(TDX 憑證只在這裡用)
 - `src/app/api/diagnostics/` — 來源連通性與回應格式探測(部署後用來把猜測換成事實)
 - `src/hooks/useCommuteState.ts` — 頁面互動狀態(時間、平日/假日、出發地/目的地、播放)
@@ -48,7 +50,7 @@ npm run check:parsers  # 即時資料解析器檢查(不需網路)
 
 ## 即時資料
 
-兩個來源,各自獨立降級——任何一個掛掉都不影響另一個,也絕不會顯示假資料。
+三個來源,各自獨立降級——任何一個掛掉都不影響另外兩個,也絕不會顯示假資料。
 
 ### 1. 國道即時路況(TDX)
 
@@ -75,7 +77,30 @@ TDX_CLIENT_SECRET=<你的 Client Secret>
 
 沒設憑證時,狀態列顯示「尚未設定 TDX 憑證」(和「連不上」是不同狀態,因為前者沒有壞掉)。
 
-### 2. 新竹市施工／交通管制公告
+### 2. 天氣背景(Open-Meteo)
+
+`src/lib/weather/` 依當下天氣把地圖背後換成三種天空之一,由 WMO 4677 天氣代碼決定:
+
+| WMO 代碼 | 天氣 | 背景 |
+| --- | --- | --- |
+| 51–57 · 61–67 · 71–77 · 80–86 · 95–99 | 毛毛雨／降雨／雪／陣雨／雷雨 | 雨天 |
+| 3 · 45 · 48 | 陰天、霧 | 陰天 |
+| 0 · 1 · 2 | 晴、大致晴、多雲時晴 | 晴天 |
+| 其他無法辨識的代碼 | — | 陰天(中性,不猜晴或雨) |
+
+雪歸在雨天:新竹平地實際上不會下雪,真下了「天上有東西掉下來」也是通勤族該看到的訊息。
+
+天空是 `WeatherBackdrop.tsx` 用 canvas 即時繪製,不是 GIF——約 1KB 而不是好幾 MB、任何像素密度都不糊、
+`prefers-reduced-motion` 時只畫一張靜止的天空。每種天空在 `.map-pane[data-weather]` 上各自指定可讀的
+文字色與節點填色,所以亮天空不會配到淺色字(反之亦然),兩種主題下都成立。
+
+Open-Meteo 免金鑰、實測從 Vercel 117ms 回應,伺服器端每 10 分鐘更新一次。抓不到天氣時**維持現在的天空
+不變**(不會退回預設);第一次就抓不到則完全不畫,地圖坐在原本的頁面底色上。
+
+中央氣象署(`opendata.cwa.gov.tw`)實測也連得到(回 401 缺金鑰),要換成官方資料只需申請免費金鑰並改寫
+`fetchWeather`,其餘程式不用動。
+
+### 3. 新竹市施工／交通管制公告
 
 `src/lib/live/constructionClient.ts` 解析新竹市政府工務處最新消息
 (<https://publicworks.hsinchu.gov.tw/News.aspx?n=538&sms=8972>)。這頁是 ASP.NET WebForms,沒有 JSON API,

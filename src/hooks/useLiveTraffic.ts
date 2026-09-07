@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ConstructionResult, LiveSegmentReading, LiveTrafficResult } from "@/lib/live/types";
 import type { WeatherReading } from "@/lib/weather/types";
 import type { SegmentId } from "@/lib/traffic/types";
@@ -18,9 +18,11 @@ export interface LiveTrafficState {
   construction: ConstructionResult | null;
   /** Null until the first successful read; a failed poll keeps the last sky. */
   weather: WeatherReading | null;
+  /** Polls /api/live-traffic immediately, outside the regular interval — e.g. when the user scrubs back to "now". */
+  refresh: () => void;
 }
 
-const INITIAL_STATE: LiveTrafficState = {
+const INITIAL_STATE: Omit<LiveTrafficState, "refresh"> = {
   readings: {},
   status: "connecting",
   lastUpdated: null,
@@ -34,9 +36,16 @@ const INITIAL_STATE: LiveTrafficState = {
  * server-side) every two minutes. On a failed poll it keeps whatever readings
  * it already had — PRD's "離線容忍" requirement: show the last successful
  * value with its timestamp, never a blank or a fabricated one.
+ *
+ * The mount effect keeps its original shape (an inline poll(), called once
+ * and then on the interval) — that's the one place React expects a fetch to
+ * kick off synchronously. `pollRef` just also exposes that same closure to
+ * `refresh`, so a caller (e.g. the time slider scrubbing back to "now") can
+ * trigger an out-of-band poll without waiting out the rest of the interval.
  */
 export function useLiveTraffic(): LiveTrafficState {
-  const [state, setState] = useState<LiveTrafficState>(INITIAL_STATE);
+  const [state, setState] = useState<Omit<LiveTrafficState, "refresh">>(INITIAL_STATE);
+  const pollRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     let cancelled = false;
@@ -75,6 +84,7 @@ export function useLiveTraffic(): LiveTrafficState {
       }
     }
 
+    pollRef.current = poll;
     poll();
     const timer = setInterval(poll, POLL_INTERVAL_MS);
     return () => {
@@ -83,5 +93,9 @@ export function useLiveTraffic(): LiveTrafficState {
     };
   }, []);
 
-  return state;
+  const refresh = useCallback(() => {
+    pollRef.current();
+  }, []);
+
+  return { ...state, refresh };
 }

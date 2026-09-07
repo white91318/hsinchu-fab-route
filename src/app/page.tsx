@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { BottomSheet } from "@/components/BottomSheet";
 import { MapPane } from "@/components/MapPane";
 import { RoutePanel } from "@/components/RoutePanel";
@@ -40,6 +40,20 @@ export default function Home() {
   // user is scrubbing the time slider to a different moment would be
   // misleading, so they're only overlaid when the slider sits on "now".
   const isCurrentlyNow = Math.abs(minutes - nowMinutes()) < 3;
+
+  // TDX has no past/future readings to fetch, only the road's current state —
+  // so the moment the slider lands back on "now" (by dragging or the ⟳
+  // button) is exactly when a fresh read is worth having, rather than
+  // waiting out the rest of the background poll interval. `null` on the
+  // first render means "no prior value yet", so mount doesn't double-fire
+  // the poll useLiveTraffic already does on its own.
+  const wasCurrentlyNowRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (wasCurrentlyNowRef.current === false && isCurrentlyNow) {
+      liveTraffic.refresh();
+    }
+    wasCurrentlyNowRef.current = isCurrentlyNow;
+  }, [isCurrentlyNow, liveTraffic]);
 
   const statuses = useMemo(
     () => computeSegmentStatuses(hour, weekday, isCurrentlyNow ? liveTraffic.readings : {}),

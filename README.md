@@ -139,11 +139,43 @@ envelope、民國/西元日期、路段前綴陷阱等 21 項,可在無網路下
 東京 hnd1)實測都是連線層級失敗,看起來是直接擋掉雲端/機房 IP;`dep-traffic.hccg.gov.tw` 連得到但卡在
 Cloudflare JS 驗證。這些路徑已從程式碼移除(它們每次請求要空等 24 秒的 timeout),改由上面兩個來源取代。
 
+## M0:資料收集
+
+PRD v0.2 §7 明講:這個網站目前顯示的路況是時間函式模擬,不是真實資料;要換成真實基準線(§7.1 的 p50／p75／
+p90),得先累積至少 4 週的歷史路況(§14 M0 的出場條件)。M0 因此**不是功能開發,是一個持續執行的排程器**——
+先把資料存起來,異常偵測與 LINE 推播都要等基準線算得出來才有意義。
+
+- `src/lib/live/tdx/freeway.ts` 的 `fetchTdxCorridorSnapshots()`:抓 TDX 國道即時路況裡,凡是路段文字含
+  竹科通勤走廊關鍵字(新竹、竹北、湖口、頭份、竹南,以及新竹系統—竹南之間查到的茄苳、香山、西濱)的所有路段,
+  不侷限於本站顯示用的 4 個命名路段。哪些路段該合併成一條「路段」是顯示層的事,不必在收集當下就決定——這也
+  是為什麼新竹系統到竹南那段(TDX 拆成 4 段,不是一段直達,見程式內註解)在這裡不是問題:每一段各自入庫,以
+  後要怎麼串隨時可以從歷史資料回頭算。
+- `src/lib/db/client.ts`:寫入 Postgres 的 `traffic_snapshot` 時序表(`section_id, section_name, source,
+  travel_minutes, speed_kmh, ts, collected_at`),用 Neon 的 HTTP driver(`@neondatabase/serverless`)——
+  cron 是短命的 serverless 呼叫,不需要維護連線池。
+- `src/app/api/cron/collect/route.ts`:被排程呼叫的進入點,`Authorization: Bearer <CRON_SECRET>` 驗證。
+- `.github/workflows/collect-traffic.yml`:每 5 分鐘打一次上面那支 route。**用 GitHub Actions 而不是
+  Vercel 原生 Cron**,因為這個專案目前是 Vercel Hobby 方案,Hobby 的 Cron Jobs 一天只能跑一次;升級 Pro
+  (US$20/月)可以改回原生 Cron,但免費的 GitHub Actions 已經夠用,沒必要為了這件事付費。
+
+### 要啟用,你要做兩件事
+
+1. **接一個 Postgres 資料庫**:Vercel 專案頁 → Storage 分頁 → Create Database → 選 Neon(免費方案即可)→
+   連到 `hsinchu-fab-route` 這個專案。連完 Vercel 會自動把連線字串寫進環境變數;程式讀的是 `DATABASE_URL`,
+   如果 Vercel 幫你取的變數名稱不是這個,去 Environment Variables 頁把值複製一份存成 `DATABASE_URL`
+   (Production 環境)。
+2. **設定 `CRON_SECRET`**:同一組值要設兩個地方——
+   - Vercel 專案 → Settings → Environment Variables → 新增 `CRON_SECRET`(Production)
+   - GitHub repo → Settings → Secrets and variables → Actions → 新增同名 secret `CRON_SECRET`
+
+兩件都設定好、觸發一次部署之後,GitHub Actions 就會開始每 5 分鐘寫一批資料進去。可以用
+`GET /api/cron/collect`(帶同一組 Bearer token)手動觸發一次確認有沒有寫入成功。
+
 ## 已知限制
 
 - 市區、園區道路與班別交接尖峰仍是時間函式模擬(含施工示範情境)。
 - 施工公告只做「列出來」,不會自動換算成某段路的壅塞係數——公告文字未必標明確切路段,硬套會產生假的精確度。
 - 即時資料只在檢視「目前時間」時套用;把時間軸拖到其他時刻一律顯示模擬值,避免把即時資料誤用在非當下的模擬情境上。
-- 尚未有資料庫或排程抓取歷史,對應 PRD 里程碑 M0(可行性驗證),還沒到 M2(正式接資料 + 歷史保存)。
+- M0 的資料收集管線已經寫好(見上一節),但要接上資料庫、設定密鑰才會真的開始累積——這兩步是人工設定,不是程式碼。
 
 詳見產品 PRD 的「路網與壅塞模型」「資料來源與整合」「非功能需求」與「風險與假設」章節。

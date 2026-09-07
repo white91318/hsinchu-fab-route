@@ -1,0 +1,26 @@
+name: M0 traffic collection
+
+# Vercel Cron on the Hobby plan only runs once a day, and M0 (PRD §12, §14)
+# needs snapshots roughly every 5 minutes to build a baseline — so this
+# calls the deployed app's cron route from GitHub Actions instead, which is
+# free on a public repo and needs no plan upgrade.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger /api/cron/collect
+        run: |
+          status=$(curl -sS -o /tmp/body.json -w "%{http_code}" \
+            -X POST "https://hsinchu-fab-route.vercel.app/api/cron/collect" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
+          echo "HTTP $status"
+          cat /tmp/body.json
+          if [ "$status" -ge 300 ]; then
+            echo "Collection call failed"
+            exit 1
+          fi

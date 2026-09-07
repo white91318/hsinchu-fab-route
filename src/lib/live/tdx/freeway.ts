@@ -249,7 +249,9 @@ export async function fetchTdxFreewayReadings(): Promise<TdxFreewayResult> {
   // individual keyword (not the keywords pooled together) — a generic word
   // like "系統" alone would otherwise flood the sample with unrelated hits
   // from interchanges nationwide and crowd out whether the specific word
-  // ("竹南") appears at all.
+  // appears at all. (This is how we found that 新竹系統—竹南 isn't one TDX
+  // section but a chain of four — see fetchTdxCorridorSnapshots below, which
+  // sidesteps the problem for M0 by recording every hop individually.)
   const unmatchedIds = (
     Object.keys(FREEWAY_SEGMENT_MATCHERS) as Array<keyof typeof FREEWAY_SEGMENT_MATCHERS>
   ).filter((id) => !matchedSegments.includes(id));
@@ -257,26 +259,14 @@ export async function fetchTdxFreewayReadings(): Promise<TdxFreewayResult> {
   if (unmatchedIds.length > 0) {
     const allTexts = Array.from(new Set(nameIndex.values()));
     unmatchedCandidates = {};
-    // TEMPORARY: 新竹系統—竹南 turned out not to be one TDX section (see the
-    // commit history on this file) — probing neighbouring-interchange names
-    // to find the real chain of hops between them before implementing it.
-    const DEBUG_EXTRA_KEYWORDS: Partial<Record<string, string[]>> = {
-      N3_ZHUNAN: ["茄苳", "西濱", "香山"],
-    };
     for (const segmentId of unmatchedIds) {
       const matcher = FREEWAY_SEGMENT_MATCHERS[segmentId];
-      const keywords = [
-        ...new Set([
-          ...matcher.fromKeywords,
-          ...matcher.toKeywords,
-          ...(DEBUG_EXTRA_KEYWORDS[segmentId] ?? []),
-        ]),
-      ];
+      const keywords = [...new Set([...matcher.fromKeywords, ...matcher.toKeywords])];
       const perKeyword: Record<string, string[]> = {};
       for (const kw of keywords) {
         perKeyword[kw] = allTexts
           .filter((text) => text.includes(kw))
-          .slice(0, 20)
+          .slice(0, 5)
           .map((text) => text.slice(0, 120));
       }
       unmatchedCandidates[segmentId] = perKeyword;
@@ -314,5 +304,125 @@ export async function fetchTdxFreewayReadings(): Promise<TdxFreewayResult> {
     readings,
     health: { status: "ok", fetchedAt, url: TDX_LIVE_FREEWAY_URL },
     shapeReport,
+  };
+}
+
+/**
+ * Broad keyword net for the whole Hsinchu commuter corridor (the road list in
+ * PRD §7.4, plus the interchange names found while mapping national-freeway
+ * coverage — see the N3_ZHUNAN unmatchedCandidates work above). Wider than
+ * FREEWAY_SEGMENT_MATCHERS on purpose.
+ */
+const CORRIDOR_KEYWORDS = ["新竹", "竹北", "湖口", "頭份", "竹南", "茄苳", "香山", "西濱", "大山", "新豐"];
+
+export interface CorridorSnapshot {
+  sectionId: string;
+  sectionName: string;
+  travelTimeMinutes: number;
+  speedKmh?: number;
+  /** Upstream-reported timestamp for this reading, as TDX sent it. */
+  asOf: string;
+}
+
+export interface CorridorFetchResult {
+  snapshots: CorridorSnapshot[];
+  health: SourceHealth;
+}
+
+/**
+ * Fetches every national-freeway section in the Hsinchu commuter corridor —
+ * not just the four named segments this app displays. M0 (PRD §12, §14)
+ * needs raw per-section snapshots to build real baselines from; deciding how
+ * sections chain into a display-level "路段" (see the N3_ZHUNAN saga above,
+ * where 新竹系統—竹南 turned out to be four separate TDX sections) is a
+ * display-layer question to answer later over the accumulated data — not one
+ * to guess at collection time. Recording every hop individually here means
+ * that decision never blocks collection.
+ */
+export async function fetchTdxCorridorSnapshots(): Promise<CorridorFetchResult> {
+  const fetchedAt = new Date().toISOString();
+  const creds = readTdxCredentials();
+
+  if (!creds) {
+    return {
+      snapshots: [],
+      health: { status: "not-configured", fetchedAt, error: "未設定 TDX_CLIENT_ID / TDX_CLIENT_SECRET" },
+    };
+  }
+
+  const token = await getTdxAccessToken(creds);
+  if (!token) {
+    const failure = getLastTokenFailure();
+    return {
+      snapshots: [],
+      health: {
+        status: "unavailable",
+        fetchedAt,
+        error: failure?.error ?? "無法取得 TDX access token",
+        triedUrls: [TDX_LIVE_FREEWAY_URL],
+      },
+    };
+  }
+
+  const [live, sections] = await Promise.all([
+    fetchJson(TDX_LIVE_FREEWAY_URL, token, LIVE_REVALIDATE_S),
+    fetchJson(TDX_FREEWAY_SECTION_URL, token, SECTION_REVALIDATE_S),
+  ]);
+
+  if (!live.ok) {
+    return {
+      snapshots: [],
+      health: {
+        status: "unavailable",
+        fetchedAt,
+        error: `即時路況取得失敗:${live.error}`,
+        triedUrls: [TDX_LIVE_FREEWAY_URL],
+      },
+    };
+  }
+
+  const liveRecords = unwrapRecords(live.payload);
+  const nameIndex = sections.ok ? buildSectionNameIndex(sections.payload) : new Map<string, string>();
+
+  const snapshots: CorridorSnapshot[] = [];
+  for (const rec of liveRecords) {
+    const sectionId = asText(firstKey(rec, SECTION_ID_KEYS));
+    if (!sectionId) continue;
+    const text = nameIndex.get(sectionId) ?? sectionDescriptiveText(rec);
+    if (!text || !CORRIDOR_KEYWORDS.some((kw) => text.includes(kw))) continue;
+
+    const travelTimeSec = Number(firstKey(rec, TRAVEL_TIME_KEYS));
+    if (!Number.isFinite(travelTimeSec) || travelTimeSec <= 0) continue;
+
+    const speedRaw = firstKey(rec, SPEED_KEYS);
+    const speed = speedRaw === undefined ? undefined : Number(speedRaw);
+
+    snapshots.push({
+      sectionId,
+      sectionName: text,
+      travelTimeMinutes: Math.round((travelTimeSec / 60) * 10) / 10,
+      speedKmh: speed !== undefined && Number.isFinite(speed) ? speed : undefined,
+      asOf: asText(firstKey(rec, TIME_KEYS)) ?? fetchedAt,
+    });
+  }
+
+  if (snapshots.length === 0) {
+    return {
+      snapshots: [],
+      health: {
+        status: "unavailable",
+        fetchedAt,
+        error:
+          liveRecords.length === 0
+            ? "TDX 回應中找不到路段陣列(格式與預期不符)"
+            : `讀到 ${liveRecords.length} 筆路段,但沒有一筆落在竹科通勤走廊關鍵字內`,
+        triedUrls: [TDX_LIVE_FREEWAY_URL, TDX_FREEWAY_SECTION_URL],
+      },
+    };
+  }
+
+  return {
+    snapshots,
+    health: { status: "ok", fetchedAt, url: TDX_LIVE_FREEWAY_URL },
   };
 }

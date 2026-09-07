@@ -264,7 +264,7 @@ export async function fetchTdxFreewayReadings(): Promise<TdxFreewayResult> {
       for (const kw of keywords) {
         perKeyword[kw] = allTexts
           .filter((text) => text.includes(kw))
-          .slice(0, 5)
+          .slice(0, 20)
           .map((text) => text.slice(0, 120));
       }
       unmatchedCandidates[segmentId] = perKeyword;

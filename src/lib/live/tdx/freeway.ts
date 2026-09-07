@@ -148,6 +148,8 @@ export interface TdxFreewayResult {
     sampleLiveKeys: string[];
     sampleSectionKeys: string[];
     matchedSegments: string[];
+    /** Section texts that hit one side of an unmatched segment's keyword pair — debugging breadcrumbs, keyed by segment id. */
+    unmatchedCandidates?: Record<string, string[]>;
   };
 }
 
@@ -243,12 +245,33 @@ export async function fetchTdxFreewayReadings(): Promise<TdxFreewayResult> {
     matchedSegments.push(segmentId);
   }
 
+  // For any segment that matched nothing, show a few section texts that hit
+  // one side of its keyword pair (but not both) — tells "the wording differs
+  // from what we guessed" apart from "TDX just doesn't carry this section".
+  const unmatchedIds = (
+    Object.keys(FREEWAY_SEGMENT_MATCHERS) as Array<keyof typeof FREEWAY_SEGMENT_MATCHERS>
+  ).filter((id) => !matchedSegments.includes(id));
+  let unmatchedCandidates: Record<string, string[]> | undefined;
+  if (unmatchedIds.length > 0) {
+    const allTexts = Array.from(new Set(nameIndex.values()));
+    unmatchedCandidates = {};
+    for (const segmentId of unmatchedIds) {
+      const matcher = FREEWAY_SEGMENT_MATCHERS[segmentId];
+      const keywords = [...matcher.fromKeywords, ...matcher.toKeywords];
+      unmatchedCandidates[segmentId] = allTexts
+        .filter((text) => keywords.some((kw) => text.includes(kw)))
+        .slice(0, 8)
+        .map((text) => text.slice(0, 120));
+    }
+  }
+
   const shapeReport = {
     liveRecordCount: liveRecords.length,
     sectionRecordCount,
     sampleLiveKeys: liveRecords[0] ? Object.keys(liveRecords[0]) : [],
     sampleSectionKeys: sections.ok ? Object.keys(unwrapRecords(sections.payload)[0] ?? {}) : [],
     matchedSegments,
+    unmatchedCandidates,
   };
 
   // Reaching TDX but recognising nothing is a failure worth naming, not a

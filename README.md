@@ -171,6 +171,37 @@ p90),得先累積至少 4 週的歷史路況(§14 M0 的出場條件)。M0 因�
 兩件都設定好、觸發一次部署之後,GitHub Actions 就會開始每 5 分鐘寫一批資料進去。可以用
 `GET /api/cron/collect`(帶同一組 Bearer token)手動觸發一次確認有沒有寫入成功。
 
+## LINE Bot(骨架,尚未啟用)
+
+PRD v0.2 §10.1:主通路是 **LINE 官方帳號 + Messaging API**(不是 2025-03-31 已停止服務的 LINE Notify)。
+**不需要另外架 server**——webhook 就是這個 Next.js 專案裡的一支 API route,跟 `/api/live-traffic` 同一種東西;
+排程推播則是由外部排程器打進來(跟 M0 collector 同一套機制)。
+
+- `src/lib/line/signature.ts` — 驗證 `x-line-signature`:以 channel secret 為金鑰,對**原始 request body**
+  做 HMAC-SHA256 再 base64。兩個關鍵細節:body 必須是未經解析的原始字串(解析成 JSON 再序列化會改變字串,
+  簽章就永遠對不上),比對必須用 `timingSafeEqual`(用 `===` 會從回應時間洩漏猜對了幾個位元組)。沒有這道
+  檢查,任何知道 webhook 網址的人都能送假事件進來。
+- `src/lib/line/client.ts` — `replyMessage()`(回覆事件,reply token 一次性、有時效)與 `pushMessage()`
+  (主動推播,之後的每日摘要與異常警報用這支)。
+- `src/app/api/line/webhook/route.ts` — webhook 進入點。
+
+目前的回覆內容刻意很少:驗證簽章、確認事件、誠實回答「警報還沒開始運作」。因為每日摘要(§6.1)和異常警報
+(§6.2)都要跟基準線比對,而 M0 還在累積那 ≥4 週的資料——在那之前假裝這些功能會動,等於捏造這個產品唯一
+要賣的東西。
+
+### 要啟用,你要做的事
+
+1. 到 [LINE Developers Console](https://developers.line.biz/console/) 建立 Provider,底下開一個
+   **Messaging API channel**
+2. 取得 **Channel Secret** 與 **Channel Access Token**
+3. 在 Vercel 加兩個環境變數(Production):`LINE_CHANNEL_SECRET`、`LINE_CHANNEL_ACCESS_TOKEN`。
+   一樣**不要**加 `NEXT_PUBLIC_` 前綴——channel secret 是用來證明 webhook 真的來自 LINE 的,access token
+   能以官方帳號名義發訊息,兩個洩漏到前端等於把這兩種能力送給每個訪客。
+4. 在 Console 把 Webhook URL 設成 `https://hsinchu-fab-route.vercel.app/api/line/webhook`,並啟用 webhook
+
+沒設定 `LINE_CHANNEL_SECRET` 時,webhook 會回 503(沒有 secret 就無法分辨真假請求,不能處理任何事件),
+不會靜默接受。
+
 ## 已知限制
 
 - 市區、園區道路與班別交接尖峰仍是時間函式模擬(含施工示範情境)。

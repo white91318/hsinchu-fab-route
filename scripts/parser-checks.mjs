@@ -245,4 +245,49 @@ check("is_day 0 is night", () => {
   assert.equal(r.isDay, false);
 });
 
+console.log("LINE webhook signature verification");
+
+const { verifyLineSignature } = await import("../src/lib/line/signature.ts");
+const { createHmac } = await import("node:crypto");
+
+const CHANNEL_SECRET = "test-channel-secret";
+const BODY = JSON.stringify({
+  destination: "U0123456789abcdef",
+  events: [{ type: "message", replyToken: "rt", message: { type: "text", text: "現在去力行六路多久" } }],
+});
+const sign = (body, secret = CHANNEL_SECRET) =>
+  createHmac("sha256", secret).update(body, "utf8").digest("base64");
+
+check("a signature LINE would send is accepted", () => {
+  assert.equal(verifyLineSignature(BODY, sign(BODY), CHANNEL_SECRET), true);
+});
+
+check("a body tampered with in transit is rejected", () => {
+  const signature = sign(BODY);
+  const tampered = BODY.replace("力行六路", "力行一路");
+  assert.equal(verifyLineSignature(tampered, signature, CHANNEL_SECRET), false);
+});
+
+check("a signature made with the wrong channel secret is rejected", () => {
+  assert.equal(verifyLineSignature(BODY, sign(BODY, "someone-elses-secret"), CHANNEL_SECRET), false);
+});
+
+check("a missing signature header is rejected, not treated as absent-so-fine", () => {
+  assert.equal(verifyLineSignature(BODY, null, CHANNEL_SECRET), false);
+  assert.equal(verifyLineSignature(BODY, undefined, CHANNEL_SECRET), false);
+  assert.equal(verifyLineSignature(BODY, "", CHANNEL_SECRET), false);
+});
+
+check("a wrong-length or garbage signature is rejected without throwing", () => {
+  // timingSafeEqual throws on length mismatch — the length guard must catch
+  // these before it, or a forged header crashes the route instead of failing.
+  assert.equal(verifyLineSignature(BODY, "c2hvcnQ=", CHANNEL_SECRET), false);
+  assert.equal(verifyLineSignature(BODY, "!!!not base64!!!", CHANNEL_SECRET), false);
+});
+
+check("the empty body LINE sends to verify a webhook URL still verifies", () => {
+  const emptyEvents = JSON.stringify({ destination: "U0", events: [] });
+  assert.equal(verifyLineSignature(emptyEvents, sign(emptyEvents), CHANNEL_SECRET), true);
+});
+
 console.log(`\n${passed} checks passed.`);

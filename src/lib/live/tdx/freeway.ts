@@ -257,9 +257,21 @@ export async function fetchTdxFreewayReadings(): Promise<TdxFreewayResult> {
   if (unmatchedIds.length > 0) {
     const allTexts = Array.from(new Set(nameIndex.values()));
     unmatchedCandidates = {};
+    // TEMPORARY: 新竹系統—竹南 turned out not to be one TDX section (see the
+    // commit history on this file) — probing neighbouring-interchange names
+    // to find the real chain of hops between them before implementing it.
+    const DEBUG_EXTRA_KEYWORDS: Partial<Record<string, string[]>> = {
+      N3_ZHUNAN: ["茄苳", "西濱", "香山"],
+    };
     for (const segmentId of unmatchedIds) {
       const matcher = FREEWAY_SEGMENT_MATCHERS[segmentId];
-      const keywords = [...new Set([...matcher.fromKeywords, ...matcher.toKeywords])];
+      const keywords = [
+        ...new Set([
+          ...matcher.fromKeywords,
+          ...matcher.toKeywords,
+          ...(DEBUG_EXTRA_KEYWORDS[segmentId] ?? []),
+        ]),
+      ];
       const perKeyword: Record<string, string[]> = {};
       for (const kw of keywords) {
         perKeyword[kw] = allTexts

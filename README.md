@@ -229,6 +229,12 @@ PRD §9 的 Baseline:每個路段 × 星期幾 × 15 分鐘時段的正常旅行
   就給 `null`,基準線還沒建起來不該讓「收集器是否活著」的報告一起掛掉)。
 - 要臨時重算一次(例如改了視窗長度)可以跑 GitHub Actions 的 **Recompute baseline** workflow,
   手動觸發,不需要自己拿到 `CRON_SECRET`。
+- `scripts/baseline-sql-check.sql` — 批次的 SQL 用真的 Postgres 驗過:百分位數的值、台北分桶(用一筆
+  台北 07:30 / UTC 前一天 23:30 的讀數,分在 UTC 就會掉到前一天的 bucket 94)、`travel_minutes <= 0`
+  被排除、視窗外被排除、過期的桶被刪掉、重跑不會撞主鍵。這些 SQL 走 Neon 的 HTTP driver,單元測試碰不到,
+  出錯只會變成生產環境裡一份安靜錯掉的基準線。
+  跑法:`BASELINE_CHECK_DATABASE_URL=... npm run check:baseline-sql`(**指向臨時資料庫**,腳本會自己
+  建表刪表)。已知限制:那份 SQL 是 `compute.ts` 的複本,沒有任何機制保證兩邊同步——改批次時要一起改。
 
 ## LINE Bot(骨架,尚未啟用)
 

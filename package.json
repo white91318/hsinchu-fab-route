@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "check:parsers": "node --import ./scripts/register-alias.mjs scripts/parser-checks.mjs"
+    "check:parsers": "node --import ./scripts/register-alias.mjs scripts/parser-checks.mjs",
+    "check:baseline-sql": "psql \"$BASELINE_CHECK_DATABASE_URL\" -f scripts/baseline-sql-check.sql"
   },
   "dependencies": {
     "@neondatabase/serverless": "^0.10.4",

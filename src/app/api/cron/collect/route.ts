@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { ensureSchema, insertSnapshots, isDatabaseConfigured } from "@/lib/db/client";
+import {
+  ensureSchema,
+  insertSnapshots,
+  isDatabaseConfigured,
+  recordCollectionRun,
+} from "@/lib/db/client";
 import { fetchTdxCorridorSnapshots } from "@/lib/live/tdx/freeway";
 
 // Cron-triggered, not user-triggered — always run fresh, and never let this
@@ -49,6 +54,13 @@ export async function POST(request: Request) {
         ts: s.asOf,
       })),
     );
+    await recordCollectionRun({
+      source: "tdx-freeway",
+      fetched: result.snapshots.length,
+      inserted,
+      duplicates,
+    });
+
     return NextResponse.json({
       status: "ok",
       fetched: result.snapshots.length,

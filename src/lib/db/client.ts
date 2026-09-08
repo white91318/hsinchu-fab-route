@@ -52,6 +52,39 @@ export async function ensureSchema(): Promise<void> {
     CREATE UNIQUE INDEX IF NOT EXISTS traffic_snapshot_section_ts_key
       ON traffic_snapshot (section_id, ts)
   `;
+
+  // Every attempt, not just the ones that stored something. Without this, a
+  // collector that is running fine but reading unchanged upstream data is
+  // indistinguishable from one that died: both simply stop adding rows to
+  // traffic_snapshot. Knowing which is which is the difference between "leave
+  // it alone" and "the collection is broken, fix it now".
+  await sql`
+    CREATE TABLE IF NOT EXISTS collection_run (
+      id BIGSERIAL PRIMARY KEY,
+      ran_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      source TEXT NOT NULL,
+      fetched INT NOT NULL,
+      inserted INT NOT NULL,
+      duplicates INT NOT NULL
+    )
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS collection_run_ran_at_idx ON collection_run (ran_at)
+  `;
+}
+
+/** Records one collection attempt, whatever it managed to store. */
+export async function recordCollectionRun(run: {
+  source: string;
+  fetched: number;
+  inserted: number;
+  duplicates: number;
+}): Promise<void> {
+  const sql = requireSql();
+  await sql`
+    INSERT INTO collection_run (source, fetched, inserted, duplicates)
+    VALUES (${run.source}, ${run.fetched}, ${run.inserted}, ${run.duplicates})
+  `;
 }
 
 export interface SnapshotRow {

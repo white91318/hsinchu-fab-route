@@ -96,10 +96,20 @@ export function matchesSegment(text: string, matcher: Matcher): boolean {
   return hasFrom && hasTo;
 }
 
+/**
+ * `freshness` is either a revalidate window (fine for the user-facing route —
+ * many visitors shouldn't mean many TDX calls) or "no-store".
+ *
+ * The collector must use "no-store". Its entire job is to capture a distinct
+ * reading at each interval, and the Data Cache's stale-while-revalidate
+ * behaviour can hand a 5-minute poll loop the same cached response over and
+ * over: the rows then collide on (section_id, ts), get dropped as duplicates,
+ * and the collection quietly runs at the cache's cadence instead of ours.
+ */
 async function fetchJson(
   url: string,
   token: string,
-  revalidate: number,
+  freshness: number | "no-store",
 ): Promise<{ ok: true; payload: unknown } | { ok: false; error: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -111,7 +121,7 @@ async function fetchJson(
         // TDX serves gzip/br; undici handles the decoding for us.
         accept: "application/json",
       },
-      next: { revalidate },
+      ...(freshness === "no-store" ? { cache: "no-store" as const } : { next: { revalidate: freshness } }),
     });
     if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
     return { ok: true, payload: await res.json() };
@@ -365,7 +375,11 @@ export async function fetchTdxCorridorSnapshots(): Promise<CorridorFetchResult> 
   }
 
   const [live, sections] = await Promise.all([
-    fetchJson(TDX_LIVE_FREEWAY_URL, token, LIVE_REVALIDATE_S),
+    // "no-store", unlike the user-facing route above: a collector that reads
+    // a cached response stores a duplicate of what it already has, and the
+    // baseline ends up sampled at the cache's cadence rather than ours.
+    fetchJson(TDX_LIVE_FREEWAY_URL, token, "no-store"),
+    // Section names really are static, so this one stays cached.
     fetchJson(TDX_FREEWAY_SECTION_URL, token, SECTION_REVALIDATE_S),
   ]);
 

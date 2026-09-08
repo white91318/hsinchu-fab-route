@@ -29,14 +29,23 @@ export interface CollectionHealth {
     spanHours: number | null;
   };
   /**
-   * Distinct collection minutes and the largest silence between them. A
-   * collector meant to run every 5 minutes that shows a 90-minute gap has
-   * been down, and no amount of later data repairs that hole in the baseline.
+   * Measured over collection *attempts*, not stored rows. A collector that is
+   * polling fine but reading unchanged upstream data stores nothing, and
+   * against row counts alone looks exactly like a collector that has died —
+   * so the gap that matters is between attempts.
+   *
+   * `duplicateRate` separates the two cases: high means the collector is
+   * healthy but polling faster than the upstream updates (or reading a cached
+   * response), low means each poll genuinely brings something new.
    */
   continuity: {
-    collectionRuns: number;
+    attempts: number;
     longestGapMinutes: number | null;
     medianGapMinutes: number | null;
+    lastAttempt: string | null;
+    duplicateRate: number | null;
+    /** Distinct minutes that actually produced rows — the old measure, kept for contrast. */
+    productiveMinutes: number;
   };
   /** Per section: sample count and the spread of travel times, to catch absurd values. */
   sections: Array<{
@@ -87,24 +96,32 @@ export async function readCollectionHealth(): Promise<CollectionHealth> {
     FROM traffic_snapshot
   `) as Array<Record<string, unknown>>;
 
-  // Gaps are measured between distinct collection minutes, not between rows:
-  // one run writes ~28 rows at the same instant, which would otherwise read
-  // as ~28 zero-length gaps and drown the real ones.
+  // Gaps come from collection_run (every attempt), not traffic_snapshot
+  // (only attempts that stored something) — see the type's comment.
   const [gapRow] = (await sql`
-    WITH runs AS (
-      SELECT DISTINCT date_trunc('minute', collected_at) AS minute
-      FROM traffic_snapshot
-    ),
-    gaps AS (
-      SELECT EXTRACT(EPOCH FROM (minute - LAG(minute) OVER (ORDER BY minute))) / 60 AS gap
-      FROM runs
+    WITH gaps AS (
+      SELECT
+        ran_at,
+        EXTRACT(EPOCH FROM (ran_at - LAG(ran_at) OVER (ORDER BY ran_at))) / 60 AS gap
+      FROM collection_run
     )
     SELECT
-      (SELECT COUNT(*)::int FROM runs)                              AS collection_runs,
-      MAX(gap)                                                      AS longest_gap,
-      percentile_cont(0.5) WITHIN GROUP (ORDER BY gap)              AS median_gap
+      (SELECT COUNT(*)::int FROM collection_run)                        AS attempts,
+      (SELECT MAX(ran_at) FROM collection_run)                          AS last_attempt,
+      (SELECT
+         CASE WHEN SUM(fetched) > 0
+           THEN SUM(duplicates)::float / SUM(fetched)
+         END
+       FROM collection_run)                                             AS duplicate_rate,
+      MAX(gap)                                                          AS longest_gap,
+      percentile_cont(0.5) WITHIN GROUP (ORDER BY gap)                  AS median_gap
     FROM gaps
     WHERE gap IS NOT NULL
+  `) as Array<Record<string, unknown>>;
+
+  const [productiveRow] = (await sql`
+    SELECT COUNT(*)::int AS productive_minutes
+    FROM (SELECT DISTINCT date_trunc('minute', collected_at) FROM traffic_snapshot) m
   `) as Array<Record<string, unknown>>;
 
   const sectionRows = (await sql`
@@ -153,9 +170,12 @@ export async function readCollectionHealth(): Promise<CollectionHealth> {
       spanHours: num(coverageRow?.span_hours),
     },
     continuity: {
-      collectionRuns: num(gapRow?.collection_runs) ?? 0,
+      attempts: num(gapRow?.attempts) ?? 0,
       longestGapMinutes: num(gapRow?.longest_gap),
       medianGapMinutes: num(gapRow?.median_gap),
+      lastAttempt: (gapRow?.last_attempt as string | null) ?? null,
+      duplicateRate: num(gapRow?.duplicate_rate),
+      productiveMinutes: num(productiveRow?.productive_minutes) ?? 0,
     },
     sections: sectionRows.map((r) => ({
       sectionId: String(r.section_id),

@@ -28,16 +28,18 @@ export async function GET() {
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (err) {
-    // A missing table is the expected state before the first collection, and
-    // is worth saying plainly rather than as a 500 that looks like a bug.
+    // A missing table is the expected state before the collector has run
+    // since the table was introduced (ensureSchema creates them on the next
+    // collection), and is worth saying plainly rather than as a 500 that
+    // looks like a bug.
     const message = err instanceof Error ? err.message : "query failed";
-    const notCollectedYet = /relation .*traffic_snapshot.* does not exist/i.test(message);
+    const missingTable = /relation .*(traffic_snapshot|collection_run).* does not exist/i.test(message);
     return NextResponse.json(
       {
-        status: notCollectedYet ? "no-data-yet" : "error",
-        error: notCollectedYet ? "traffic_snapshot 還不存在——收集器尚未成功寫入過" : message,
+        status: missingTable ? "no-data-yet" : "error",
+        error: missingTable ? `資料表還不存在,等下一次收集建立:${message}` : message,
       },
-      { status: notCollectedYet ? 200 : 500, headers: { "Cache-Control": "no-store" } },
+      { status: missingTable ? 200 : 500, headers: { "Cache-Control": "no-store" } },
     );
   }
 }

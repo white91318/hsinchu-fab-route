@@ -198,6 +198,38 @@ p90),得先累積至少 4 週的歷史路況(§14 M0 的出場條件)。M0 因�
 不會回頭讀新值。可以用 `GET /api/cron/collect`(帶同一組 Bearer token)手動觸發一次,確認回應是
 `{"status":"ok","fetched":N,"inserted":N,...}` 而不是 401 或 `not-configured`。
 
+## 基準線批次(Baseline)
+
+PRD §9 的 Baseline:每個路段 × 星期幾 × 15 分鐘時段的正常旅行時間分布(p50/p75/p90)。這是「今天跟平常
+不一樣」裡的**平常**,異常判定(§7.2)全部靠它。
+
+- `src/lib/baseline/bucket.ts` — 時段格子。全部用 **Asia/Taipei**,這不是顯示偏好的問題:格子的意義是
+  「這裡正常的週二 08:00」,用 UTC 分桶會把每筆讀數平移 8 小時,台北的 00:00–08:00 會被歸到**前一天**的
+  星期——週一清晨落進週日的桶裡,週一早尖峰就會拿去跟含週末車流的樣本比。錯得很安靜,不會壞給你看。
+  批次在 SQL 裡分桶,消費端要在 TypeScript 裡算出同一個 key,兩份實作同一條規則本身就是風險,所以
+  `scripts/parser-checks.mjs` 把邊界(台北午夜、UTC 換日、ISODOW 的星期天 = 7)釘住。
+- `src/lib/baseline/classify.ts` — 純函式的異常分級,不碰資料庫所以可以直接測。門檻照 §7.2:≤P75 正常、
+  >P75 且 ≤P90 注意、>P90 異常,下緣一律含等於(剛好落在 P75 的讀數按定義就在正常的四分之三裡,推播出去
+  就是誤報,而 §4.2 把誤報率列為會殺死產品的指標)。樣本不足時回 **`unknown`,不是 `normal`**——這兩個
+  是不同的宣稱,「正常」是在告訴通勤者今天路上沒事,拿三筆讀數講這句話正是 §11(資料誠實)要擋的事。
+- `src/lib/baseline/compute.ts` — 批次本體。從 `traffic_snapshot` 的**滾動 8 週**視窗整批重算:百分位數
+  本來就無法增量維護(要維護也得留著整份樣本),整批重算則保證 baseline 表跟原始資料永遠對得起來。
+  幾個刻意的選擇:
+  - 一句 `INSERT … ON CONFLICT DO UPDATE`,不是 DELETE 再 INSERT。後者會有一段空窗期,那段時間任何比對
+    都會得到「每條路都 unknown」——自己造成的停機。
+  - 視窗外已無資料的桶會被刪掉(比對資料庫時鐘取的 `computed_at`,不是應用端的時鐘,否則幾秒的時差就會
+    刪掉這次剛寫進去的列)。留著舊數字的桶,對讀取端來說跟新鮮的桶長得一模一樣。
+  - 只濾掉 `travel_minutes <= 0`(壞讀數)。異常**慢**的讀數不濾——那通常是真的塞車,而 p90 就是為了
+    記得這種時候而存在的。
+- `src/app/api/cron/baseline/route.ts` — 每日重算的進入點,一樣用 `Authorization: Bearer <CRON_SECRET>`。
+  **這個排程 Vercel Hobby 跑得動**:每日正是它唯一允許的頻率,所以不像 5 分鐘的收集需要繞路,直接寫在
+  `vercel.json`(19:20 UTC / 台北 03:20)。八週的百分位數不會因為多一天的資料而變多少,算更密只是浪費。
+  回應會回報 `buckets` 與 `reliableBuckets`——後者是樣本數過門檻、真的能拿來判斷的桶數,也就是決定
+  M0 何時算完成的那個數字。同一份數字也接在 `/api/diagnostics/collection` 的 `baseline` 欄位裡(讀不到
+  就給 `null`,基準線還沒建起來不該讓「收集器是否活著」的報告一起掛掉)。
+- 要臨時重算一次(例如改了視窗長度)可以跑 GitHub Actions 的 **Recompute baseline** workflow,
+  手動觸發,不需要自己拿到 `CRON_SECRET`。
+
 ## LINE Bot(骨架,尚未啟用)
 
 PRD v0.2 §10.1:主通路是 **LINE 官方帳號 + Messaging API**(不是 2025-03-31 已停止服務的 LINE Notify)。

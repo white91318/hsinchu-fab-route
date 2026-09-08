@@ -1,0 +1,50 @@
+name: Recompute baseline
+
+# The daily recompute is Vercel Cron's job (see vercel.json) — daily is the
+# one cadence the Hobby plan does allow, so unlike the 5-minute collection it
+# does not need a workaround.
+#
+# This workflow exists for the other case: recomputing on demand, without
+# needing CRON_SECRET to hand. Useful right after a schema or window change,
+# and as a way to see the batch's own report on how usable the baseline
+# currently is.
+on:
+  workflow_dispatch:
+    inputs:
+      window_days:
+        description: "Trailing window in days (blank = the endpoint's default of 56)"
+        required: false
+        default: ""
+
+jobs:
+  recompute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Recompute
+        env:
+          COLLECT_URL: ${{ secrets.COLLECT_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          WINDOW_DAYS: ${{ inputs.window_days }}
+        run: |
+          set -euo pipefail
+          # Same deployment as the collector; only the path differs, so one
+          # secret keeps pointing at the right place.
+          base="${COLLECT_URL%/api/cron/collect}"
+          url="${base}/api/cron/baseline"
+          if [ -n "${WINDOW_DAYS}" ]; then
+            url="${url}?windowDays=${WINDOW_DAYS}"
+          fi
+
+          body=$(mktemp)
+          status=$(curl -sS -o "$body" -w "%{http_code}" -X POST "$url" \
+            -H "Authorization: Bearer ${CRON_SECRET}") || status="000"
+
+          echo "HTTP ${status}"
+          cat "$body"
+          echo
+
+          if [ "$status" != "200" ]; then
+            echo "::error::baseline recompute failed (HTTP ${status})"
+            exit 1
+          fi

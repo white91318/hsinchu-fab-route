@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readBaselineReadiness } from "@/lib/baseline/compute";
 import { isDatabaseConfigured } from "@/lib/db/client";
 import { readCollectionHealth } from "@/lib/db/collectionHealth";
 
@@ -23,8 +24,12 @@ export async function GET() {
 
   try {
     const health = await readCollectionHealth();
+    // Best-effort and deliberately not fatal: the baseline table only exists
+    // once the batch has run, and a missing baseline must not take down the
+    // report that says whether collection itself is alive.
+    const baseline = await readBaselineReadiness().catch(() => null);
     return NextResponse.json(
-      { status: "ok", checkedAt: new Date().toISOString(), ...health },
+      { status: "ok", checkedAt: new Date().toISOString(), ...health, baseline },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (err) {

@@ -157,7 +157,7 @@ export async function readCollectionHealth(): Promise<CollectionHealth> {
         percentile_cont(0.5) WITHIN GROUP (ORDER BY travel_minutes) AS median_minutes
       FROM traffic_snapshot
       GROUP BY section_id
-    )
+    ),
     ratios AS (
       SELECT
         EXTRACT(HOUR FROM t.ts AT TIME ZONE 'Asia/Taipei')::int AS hour,

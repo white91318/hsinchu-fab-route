@@ -290,4 +290,108 @@ check("the empty body LINE sends to verify a webhook URL still verifies", () => 
   assert.equal(verifyLineSignature(emptyEvents, sign(emptyEvents), CHANNEL_SECRET), true);
 });
 
+console.log("Baseline bucketing (Asia/Taipei)");
+
+const { taipeiBucket, bucketLabel, BUCKETS_PER_DAY } = await import("../src/lib/baseline/bucket.ts");
+
+check("a Taipei morning lands in the right weekday and slot", () => {
+  // 2026-09-08T07:52+08:00 is a Tuesday morning -> ISODOW 2, 07:45 slot.
+  const { dow, bucket } = taipeiBucket(new Date("2026-09-08T07:52:00+08:00"));
+  assert.equal(dow, 2);
+  assert.equal(bucket, 7 * 4 + 3);
+  assert.equal(bucketLabel(bucket), "07:45");
+});
+
+check("a UTC instant is bucketed by its Taipei wall clock, not UTC's", () => {
+  // 2026-09-07T23:30Z is already Tuesday 07:30 in Taipei. Bucketing in UTC
+  // would file it under Monday's late evening -- the exact eight-hour smear
+  // that would compare a Tuesday peak against a Monday night.
+  const { dow, bucket } = taipeiBucket(new Date("2026-09-07T23:30:00Z"));
+  assert.equal(dow, 2);
+  assert.equal(bucket, 7 * 4 + 2);
+});
+
+check("Taipei midnight is bucket 0 of the new day, never 96 of the old one", () => {
+  const { dow, bucket } = taipeiBucket(new Date("2026-09-07T16:00:00Z")); // 2026-09-08 00:00 +08
+  assert.equal(dow, 2);
+  assert.equal(bucket, 0);
+  assert.equal(bucketLabel(0), "00:00");
+});
+
+check("Sunday is ISODOW 7, matching Postgres rather than JS getDay()", () => {
+  assert.equal(taipeiBucket(new Date("2026-09-06T10:00:00+08:00")).dow, 7);
+  assert.equal(taipeiBucket(new Date("2026-09-07T10:00:00+08:00")).dow, 1);
+});
+
+check("every bucket index stays inside the day", () => {
+  for (let minutes = 0; minutes < 24 * 60; minutes += 5) {
+    const at = new Date(Date.UTC(2026, 8, 8, 0, 0) - 8 * 3600_000 + minutes * 60_000);
+    const { bucket } = taipeiBucket(at);
+    assert.ok(bucket >= 0 && bucket < BUCKETS_PER_DAY, `${minutes} -> ${bucket}`);
+  }
+  assert.equal(bucketLabel(BUCKETS_PER_DAY - 1), "23:45");
+});
+
+console.log("Anomaly classification against a baseline");
+
+const { classifyAgainstBaseline, raiseForIncident, MIN_SAMPLES_FOR_BASELINE } = await import(
+  "../src/lib/baseline/classify.ts"
+);
+
+const solid = (p75, p90) => ({ p75, p90, sampleSize: MIN_SAMPLES_FOR_BASELINE });
+
+check("below P75 is normal", () => {
+  assert.equal(classifyAgainstBaseline(8, solid(10, 14)).level, "normal");
+});
+
+check("exactly on P75 is still normal, not escalated", () => {
+  // The lower edge is inclusive by definition: a reading sitting on P75 is
+  // inside the normal three-quarters. Pushing a notification for it is a
+  // false alarm, and PRD 4.2 makes false alarms the thing that kills this.
+  assert.equal(classifyAgainstBaseline(10, solid(10, 14)).level, "normal");
+});
+
+check("between P75 and P90 is watch", () => {
+  assert.equal(classifyAgainstBaseline(10.01, solid(10, 14)).level, "watch");
+  assert.equal(classifyAgainstBaseline(13.9, solid(10, 14)).level, "watch");
+});
+
+check("exactly on P90 is watch, above it is anomaly", () => {
+  assert.equal(classifyAgainstBaseline(14, solid(10, 14)).level, "watch");
+  assert.equal(classifyAgainstBaseline(14.01, solid(10, 14)).level, "anomaly");
+});
+
+check("a thin bucket answers unknown, never normal", () => {
+  // The dangerous failure is not "no answer", it is a confident "normal"
+  // derived from three readings.
+  const thin = { p75: 10, p90: 14, sampleSize: MIN_SAMPLES_FOR_BASELINE - 1 };
+  const result = classifyAgainstBaseline(8, thin);
+  assert.equal(result.level, "unknown");
+  assert.equal(result.reliable, false);
+  assert.equal(result.ratioToP75, null);
+});
+
+check("a missing bucket answers unknown rather than throwing", () => {
+  assert.equal(classifyAgainstBaseline(8, null).level, "unknown");
+  assert.equal(classifyAgainstBaseline(8, undefined).level, "unknown");
+});
+
+check("a thin bucket stays unknown even when the reading is extreme", () => {
+  const thin = { p75: 10, p90: 14, sampleSize: 2 };
+  assert.equal(classifyAgainstBaseline(99, thin).level, "unknown");
+});
+
+check("ratioToP75 is reported for reliable buckets and survives a zero P75", () => {
+  assert.equal(classifyAgainstBaseline(15, solid(10, 14)).ratioToP75, 1.5);
+  assert.equal(classifyAgainstBaseline(15, solid(0, 0)).ratioToP75, null);
+});
+
+check("a closure forces anomaly, roadworks raises but never downgrades", () => {
+  assert.equal(raiseForIncident("normal", "closure"), "anomaly");
+  assert.equal(raiseForIncident("unknown", "closure"), "anomaly");
+  assert.equal(raiseForIncident("normal", "roadworks"), "watch");
+  assert.equal(raiseForIncident("anomaly", "roadworks"), "anomaly");
+  assert.equal(raiseForIncident("watch", "none"), "watch");
+});
+
 console.log(`\n${passed} checks passed.`);

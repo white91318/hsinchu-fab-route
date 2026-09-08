@@ -71,6 +71,25 @@ export async function ensureSchema(): Promise<void> {
   await sql`
     CREATE INDEX IF NOT EXISTS collection_run_ran_at_idx ON collection_run (ran_at)
   `;
+
+  // PRD §9's Baseline: the normal travel-time distribution per section, per
+  // day of week, per 15-minute bucket. This is what "今天跟平常不一樣" is
+  // measured against, so `sample_size` is stored alongside the percentiles —
+  // a P90 computed from three readings is a number, but not an answer, and
+  // the consumer has to be able to tell the difference.
+  await sql`
+    CREATE TABLE IF NOT EXISTS baseline (
+      section_id   TEXT NOT NULL,
+      dow          SMALLINT NOT NULL,
+      bucket       SMALLINT NOT NULL,
+      p50          DOUBLE PRECISION NOT NULL,
+      p75          DOUBLE PRECISION NOT NULL,
+      p90          DOUBLE PRECISION NOT NULL,
+      sample_size  INT NOT NULL,
+      computed_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (section_id, dow, bucket)
+    )
+  `;
 }
 
 /** Records one collection attempt, whatever it managed to store. */

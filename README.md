@@ -154,23 +154,34 @@ p90),得先累積至少 4 週的歷史路況(§14 M0 的出場條件)。M0 因�
   travel_minutes, speed_kmh, ts, collected_at`),用 Neon 的 HTTP driver(`@neondatabase/serverless`)——
   cron 是短命的 serverless 呼叫,不需要維護連線池。
 - `src/app/api/cron/collect/route.ts`:被排程呼叫的進入點,`Authorization: Bearer <CRON_SECRET>` 驗證。
-- **排程**:由外部 cron 服務每 5 分鐘打一次上面那支 route。
-  `.github/workflows/collect-traffic.yml` 降級成每小時的備援,不是主要排程器。
+- **排程**:`.github/workflows/collect-traffic.yml`。每小時的 cron **只是重啟觸發器**,真正的頻率來自
+  job 內部的迴圈——進去之後每 5 分鐘打一次 route,持續約 5 小時 20 分後自行結束,等下一次 cron 把它重新拉起來。
 
-  排程器換過一輪,理由記在這裡免得之後有人再踩同一個坑:原本用 GitHub Actions 的 `*/5 * * * *`,
-  實測 11 小時只跑了 2 次(不是應有的約 130 次),而且兩次相隔 5.5 小時。GitHub 的 schedule 事件跑在共用的
-  best-effort 基礎設施上,官方明講不保證準時,短間隔實務上不會被遵守。Vercel 原生 Cron 則是因為本專案是
-  Hobby 方案,一天只能跑一次(要每分鐘精度得升級 Pro,US$20/月)。所以主排程改用外部免費 cron 服務。
+  為什麼要這樣繞,兩個顯而易見的選項都被實測排除了,記在這裡免得之後有人再踩一次:
 
-  GitHub Actions 留著當每小時的安全網:外部排程器如果無聲無息掛掉,至少還有資料進來,而且失敗會顯示在
-  Actions 分頁。兩邊同時觸發也無所謂——重複的讀數會被資料庫擋掉(見下)。
+  - **Vercel 原生 Cron**:本專案是 Hobby 方案,一天只能跑一次。而且填比一天更頻繁的排程不是變慢,是
+    **讓部署直接失敗**(`Hobby accounts are limited to daily cron jobs`)。Hobby 的每日 cron 連時間都不準,
+    會在指定的那個小時內隨機挑時間;要分鐘級精度得升級 Pro(US$20/月)。
+  - **GitHub 自己的 `schedule` 事件**:原本設 `*/5 * * * *`,實測 11 小時只跑 2 次(不是應有的約 130 次)。
+    schedule 事件跑在共用的 best-effort 基礎設施上,官方明講不保證準時,短間隔實務上不會被遵守。
+
+  **已知取捨(刻意接受的)**:長輪詢等於讓 runner 近乎全天候佔用,是 Actions 使用條款的灰色地帶。優先順序
+  是先把資料累積起來,之後若 GitHub 有意見再換。換的成本很低——endpoint 本身跟排程器無關,改用 Vercel Pro
+  的 cron 或外部 cron 服務都只是設定變更,不用改程式。
+
+  幾個實作上的細節,拆掉任何一個都會讓它安靜地壞掉:
+  - `concurrency` 群組確保同時只有一個收集器,否則每次重啟觸發都會再疊一個 5 小時的 job 上去。
+  - 迴圈的死線設在 `timeout-minutes` 之前——被 timeout 砍掉的 run 會標記成失敗,真正的失敗就被雜訊蓋掉了。
+  - `curl` 失敗時用 `|| status="000"` 接住:workflow 預設的 shell 是 `bash -e`,少了這個,一次連線失敗
+    就會終止整個 run。
+  - 只有「一次都沒成功」才讓 run 變紅。5 小時內偶發失敗是正常的,每次都變紅只會訓練大家忽略這個 workflow。
 
 - **重複讀數處理**:`traffic_snapshot` 對 `(section_id, ts)` 建了唯一索引,寫入時 `ON CONFLICT DO NOTHING`。
   TDX 的即時路況大約每分鐘更新一次,而我們每 5 分鐘抓一次,所以有機會讀到還沒更新的同一筆讀數;把同一筆存兩次
   會在算 p50/p75/p90 時過度加權那個時間點,等於安靜地污染 M0 唯一要產出的東西。API 回應會分開回報
   `inserted` 與 `duplicates`,因為「上游沒有新資料」和「收集器壞了」從筆數上看起來是一樣的。
 
-### 要啟用,你要做三件事
+### 設定(已完成,記錄用)
 
 1. **接一個 Postgres 資料庫**:Vercel 專案頁 → Storage 分頁 → Create Database → 選 Neon(免費方案即可)→
    連到 `hsinchu-fab-route` 這個專案。連完 Vercel 會自動把連線字串寫進環境變數;程式讀的是 `DATABASE_URL`,
@@ -178,14 +189,10 @@ p90),得先累積至少 4 週的歷史路況(§14 M0 的出場條件)。M0 因�
    (Production 環境)。
 2. **設定 `CRON_SECRET`**:同一組值要設兩個地方——
    - Vercel 專案 → Settings → Environment Variables → 新增 `CRON_SECRET`(Production)
-   - GitHub repo → Settings → Secrets and variables → Actions → 新增同名 secret `CRON_SECRET`(備援排程用)
-3. **設定外部 cron 服務**(主排程):建立一個每 5 分鐘執行的工作,設定為
-   - URL:`https://hsinchu-fab-route.vercel.app/api/cron/collect`
-   - Method:`POST`(route 也接受 GET)
-   - Header:`Authorization: Bearer <跟上面同一組 CRON_SECRET>`
+   - GitHub repo → Settings → Secrets and variables → Actions → 新增同名 secret `CRON_SECRET`
 
-   **密鑰只能放在 header,不要用 query string 傳**——網址會留在各種存取紀錄、瀏覽器歷史與 referrer 裡,
-   等於把密鑰散佈出去。所以要挑一個支援自訂 request header 的服務。
+密鑰是用 `Authorization: Bearer` header 傳的,**不要改成用 query string**——網址會留在各種存取紀錄、
+瀏覽器歷史與 referrer 裡,等於把密鑰散佈出去。之後若要換成外部 cron 服務,也要挑支援自訂 request header 的。
 
 **環境變數改了之後一定要重新部署**才會生效:Vercel 是在建置當下把環境變數打包進該次部署的,既有的部署
 不會回頭讀新值。可以用 `GET /api/cron/collect`(帶同一組 Bearer token)手動觸發一次,確認回應是

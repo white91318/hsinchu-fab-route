@@ -1,31 +1,83 @@
-name: M0 traffic collection (backup)
+name: M0 traffic collection
 
-# NOT the primary scheduler. A `*/5` schedule here was measured producing two
-# runs in eleven hours, not the ~130 it implies: GitHub runs the schedule
-# event on shared best-effort infrastructure and does not honour short
-# intervals. The every-5-minutes collection M0 needs (PRD §12) runs from an
-# external cron service instead, hitting the same endpoint.
+# M0 (PRD §12, §14) needs a snapshot roughly every 5 minutes to build a
+# baseline. Neither obvious scheduler delivers that here:
 #
-# This stays as an hourly safety net: if the external scheduler dies quietly,
-# some data keeps landing and the failures stay visible in the Actions tab.
-# Double-collecting is harmless — the endpoint drops rows it already has.
+# - Vercel Cron: this project is on Hobby, which is daily-only. A sub-daily
+#   expression doesn't just run slowly, it fails the deployment outright
+#   ("Hobby accounts are limited to daily cron jobs").
+# - GitHub's own `schedule`: measured at two runs in eleven hours from a
+#   `*/5` expression. The schedule event is best-effort on shared
+#   infrastructure and short intervals are not honoured.
+#
+# So the schedule below is only a *restart* trigger: each run then loops
+# internally, collecting every 5 minutes for most of a job's lifetime. The
+# hourly cron just has to land often enough to keep a job alive.
+#
+# Known trade-off, accepted deliberately: this occupies a runner nearly
+# continuously, which is a grey area under the Actions terms of use. Revisit
+# if GitHub objects — the endpoint is scheduler-agnostic, so switching to a
+# paid Vercel Pro cron or an external cron service is a config change, not a
+# code change.
 on:
   schedule:
     - cron: "0 * * * *"
   workflow_dispatch: {}
 
+# One collector at a time. Without this, every restart trigger would stack
+# another 5-hour job on top of the one already running.
+concurrency:
+  group: m0-traffic-collection
+  cancel-in-progress: false
+
 jobs:
   collect:
     runs-on: ubuntu-latest
+    # Under GitHub's 6h job ceiling, so the loop below can exit on its own
+    # terms rather than being killed mid-request.
+    timeout-minutes: 350
     steps:
-      - name: Trigger /api/cron/collect
+      - name: Collect every 5 minutes
+        env:
+          # Via env rather than inline interpolation, so the secret is never
+          # substituted into the script text itself.
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          ENDPOINT: https://hsinchu-fab-route.vercel.app/api/cron/collect
         run: |
-          status=$(curl -sS -o /tmp/body.json -w "%{http_code}" \
-            -X POST "https://hsinchu-fab-route.vercel.app/api/cron/collect" \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
-          echo "HTTP $status"
-          cat /tmp/body.json
-          if [ "$status" -ge 300 ]; then
-            echo "Collection call failed"
+          set -u
+          INTERVAL=300
+          # Stop short of timeout-minutes: a run killed by the timeout is
+          # reported as a failure, which would bury real failures in noise.
+          DEADLINE=$(( 5 * 3600 + 20 * 60 ))
+          ok=0
+          fail=0
+
+          while [ "$SECONDS" -lt "$DEADLINE" ]; do
+            # `bash -e` aborts the step on a non-zero exit, so a single
+            # unreachable-host blip would end the whole run without the
+            # fallback here.
+            status=$(curl -sS -m 60 -o /tmp/body.json -w "%{http_code}" \
+              -X POST "$ENDPOINT" \
+              -H "Authorization: Bearer $CRON_SECRET") || status="000"
+
+            body=$(cat /tmp/body.json 2>/dev/null || true)
+            echo "$(date -u +%H:%M:%SZ) HTTP $status $body"
+
+            if [ "$status" = "200" ]; then
+              ok=$((ok + 1))
+            else
+              fail=$((fail + 1))
+            fi
+
+            sleep "$INTERVAL"
+          done
+
+          echo "---"
+          echo "collections ok=$ok fail=$fail"
+          # Only a run that never once succeeded is worth going red for.
+          # Occasional blips are expected over five hours and shouldn't train
+          # anyone to ignore this workflow's status.
+          if [ "$ok" -eq 0 ]; then
+            echo "every collection attempt failed"
             exit 1
           fi

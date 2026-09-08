@@ -63,16 +63,26 @@ export interface CollectionHealth {
    * (08:00, 15:48, 23:30) — which is the single most valuable thing to learn
    * early, because the whole product rests on that claim.
    *
-   * `congestionIndex` is the median of each reading divided by its own
-   * section's median, so 1.0 means "normal for this road" and 1.4 means
-   * "40% slower than this road usually is". Raw minutes can't answer this:
-   * sections here run from 1.2 to 9.3 minutes, so a median across them is
-   * dominated by the mid-length roads and barely moves when one jams.
+   * Each reading is divided by its own section's median, so 1.0 means
+   * "normal for this road" and 1.4 means "40% slower than this road usually
+   * is". Raw minutes can't answer this: sections here run from 1.2 to 9.3
+   * minutes, so a median across them is dominated by the mid-length roads.
+   *
+   * Both a middle and a tail statistic, because they answer different
+   * questions and the first alone is misleading. `congestionIndex` (median
+   * across sections) says whether the whole corridor is slow; `worstIndex`
+   * plus `worstSection` says whether *anything* is jammed. A real
+   * single-direction jam — 新竹→竹北 at 2.3x during the evening peak, while
+   * the opposite direction ran normally — moved `worstIndex` and left
+   * `congestionIndex` sitting at exactly 1.0. PRD §7.2 defines an anomaly
+   * per segment, so the tail is the number that matters.
    */
   hourlyShape: Array<{
     hour: number;
     samples: number;
     congestionIndex: number | null;
+    worstIndex: number | null;
+    worstSection: string | null;
     medianMinutes: number | null;
   }>;
 }
@@ -148,17 +158,35 @@ export async function readCollectionHealth(): Promise<CollectionHealth> {
       FROM traffic_snapshot
       GROUP BY section_id
     )
+    ratios AS (
+      SELECT
+        EXTRACT(HOUR FROM t.ts AT TIME ZONE 'Asia/Taipei')::int AS hour,
+        t.section_name,
+        t.travel_minutes,
+        t.travel_minutes / NULLIF(m.median_minutes, 0) AS ratio
+      FROM traffic_snapshot t
+      JOIN section_median m ON m.section_id = t.section_id
+    ),
+    -- The single slowest-relative-to-itself reading in each hour, and which
+    -- road it was: a corridor-wide median hides exactly the single-segment
+    -- jam this product exists to catch.
+    worst AS (
+      SELECT DISTINCT ON (hour) hour, section_name, ratio
+      FROM ratios
+      WHERE ratio IS NOT NULL
+      ORDER BY hour, ratio DESC
+    )
     SELECT
-      EXTRACT(HOUR FROM t.ts AT TIME ZONE 'Asia/Taipei')::int AS hour,
+      r.hour,
       COUNT(*)::int AS samples,
-      percentile_cont(0.5) WITHIN GROUP (
-        ORDER BY t.travel_minutes / NULLIF(m.median_minutes, 0)
-      ) AS congestion_index,
-      percentile_cont(0.5) WITHIN GROUP (ORDER BY t.travel_minutes) AS median_minutes
-    FROM traffic_snapshot t
-    JOIN section_median m ON m.section_id = t.section_id
-    GROUP BY hour
-    ORDER BY hour
+      percentile_cont(0.5) WITHIN GROUP (ORDER BY r.ratio) AS congestion_index,
+      MAX(w.ratio) AS worst_index,
+      MAX(w.section_name) AS worst_section,
+      percentile_cont(0.5) WITHIN GROUP (ORDER BY r.travel_minutes) AS median_minutes
+    FROM ratios r
+    JOIN worst w ON w.hour = r.hour
+    GROUP BY r.hour
+    ORDER BY r.hour
   `) as Array<Record<string, unknown>>;
 
   return {
@@ -189,6 +217,8 @@ export async function readCollectionHealth(): Promise<CollectionHealth> {
       hour: num(r.hour) ?? 0,
       samples: num(r.samples) ?? 0,
       congestionIndex: num(r.congestion_index),
+      worstIndex: num(r.worst_index),
+      worstSection: (r.worst_section as string | null) ?? null,
       medianMinutes: num(r.median_minutes),
     })),
   };

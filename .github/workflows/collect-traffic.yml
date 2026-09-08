@@ -1,12 +1,17 @@
-name: M0 traffic collection
+name: M0 traffic collection (backup)
 
-# Vercel Cron on the Hobby plan only runs once a day, and M0 (PRD §12, §14)
-# needs snapshots roughly every 5 minutes to build a baseline — so this
-# calls the deployed app's cron route from GitHub Actions instead, which is
-# free on a public repo and needs no plan upgrade.
+# NOT the primary scheduler. A `*/5` schedule here was measured producing two
+# runs in eleven hours, not the ~130 it implies: GitHub runs the schedule
+# event on shared best-effort infrastructure and does not honour short
+# intervals. The every-5-minutes collection M0 needs (PRD §12) runs from an
+# external cron service instead, hitting the same endpoint.
+#
+# This stays as an hourly safety net: if the external scheduler dies quietly,
+# some data keeps landing and the failures stay visible in the Actions tab.
+# Double-collecting is harmless — the endpoint drops rows it already has.
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "0 * * * *"
   workflow_dispatch: {}
 
 jobs:

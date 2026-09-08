@@ -39,7 +39,7 @@ export async function POST(request: Request) {
 
   try {
     await ensureSchema();
-    const inserted = await insertSnapshots(
+    const { inserted, duplicates } = await insertSnapshots(
       result.snapshots.map((s) => ({
         sectionId: s.sectionId,
         sectionName: s.sectionName,
@@ -49,7 +49,16 @@ export async function POST(request: Request) {
         ts: s.asOf,
       })),
     );
-    return NextResponse.json({ status: "ok", inserted, fetchedAt: result.health.fetchedAt });
+    return NextResponse.json({
+      status: "ok",
+      fetched: result.snapshots.length,
+      inserted,
+      // All-duplicates means TDX hadn't refreshed since the last run — worth
+      // seeing, because a run that stores nothing is otherwise
+      // indistinguishable from a broken collector.
+      duplicates,
+      fetchedAt: result.health.fetchedAt,
+    });
   } catch (err) {
     return NextResponse.json(
       { status: "error", error: err instanceof Error ? err.message : "database write failed" },

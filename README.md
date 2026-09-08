@@ -154,11 +154,23 @@ p90),得先累積至少 4 週的歷史路況(§14 M0 的出場條件)。M0 因�
   travel_minutes, speed_kmh, ts, collected_at`),用 Neon 的 HTTP driver(`@neondatabase/serverless`)——
   cron 是短命的 serverless 呼叫,不需要維護連線池。
 - `src/app/api/cron/collect/route.ts`:被排程呼叫的進入點,`Authorization: Bearer <CRON_SECRET>` 驗證。
-- `.github/workflows/collect-traffic.yml`:每 5 分鐘打一次上面那支 route。**用 GitHub Actions 而不是
-  Vercel 原生 Cron**,因為這個專案目前是 Vercel Hobby 方案,Hobby 的 Cron Jobs 一天只能跑一次;升級 Pro
-  (US$20/月)可以改回原生 Cron,但免費的 GitHub Actions 已經夠用,沒必要為了這件事付費。
+- **排程**:由外部 cron 服務每 5 分鐘打一次上面那支 route。
+  `.github/workflows/collect-traffic.yml` 降級成每小時的備援,不是主要排程器。
 
-### 要啟用,你要做兩件事
+  排程器換過一輪,理由記在這裡免得之後有人再踩同一個坑:原本用 GitHub Actions 的 `*/5 * * * *`,
+  實測 11 小時只跑了 2 次(不是應有的約 130 次),而且兩次相隔 5.5 小時。GitHub 的 schedule 事件跑在共用的
+  best-effort 基礎設施上,官方明講不保證準時,短間隔實務上不會被遵守。Vercel 原生 Cron 則是因為本專案是
+  Hobby 方案,一天只能跑一次(要每分鐘精度得升級 Pro,US$20/月)。所以主排程改用外部免費 cron 服務。
+
+  GitHub Actions 留著當每小時的安全網:外部排程器如果無聲無息掛掉,至少還有資料進來,而且失敗會顯示在
+  Actions 分頁。兩邊同時觸發也無所謂——重複的讀數會被資料庫擋掉(見下)。
+
+- **重複讀數處理**:`traffic_snapshot` 對 `(section_id, ts)` 建了唯一索引,寫入時 `ON CONFLICT DO NOTHING`。
+  TDX 的即時路況大約每分鐘更新一次,而我們每 5 分鐘抓一次,所以有機會讀到還沒更新的同一筆讀數;把同一筆存兩次
+  會在算 p50/p75/p90 時過度加權那個時間點,等於安靜地污染 M0 唯一要產出的東西。API 回應會分開回報
+  `inserted` 與 `duplicates`,因為「上游沒有新資料」和「收集器壞了」從筆數上看起來是一樣的。
+
+### 要啟用,你要做三件事
 
 1. **接一個 Postgres 資料庫**:Vercel 專案頁 → Storage 分頁 → Create Database → 選 Neon(免費方案即可)→
    連到 `hsinchu-fab-route` 這個專案。連完 Vercel 會自動把連線字串寫進環境變數;程式讀的是 `DATABASE_URL`,
@@ -166,10 +178,18 @@ p90),得先累積至少 4 週的歷史路況(§14 M0 的出場條件)。M0 因�
    (Production 環境)。
 2. **設定 `CRON_SECRET`**:同一組值要設兩個地方——
    - Vercel 專案 → Settings → Environment Variables → 新增 `CRON_SECRET`(Production)
-   - GitHub repo → Settings → Secrets and variables → Actions → 新增同名 secret `CRON_SECRET`
+   - GitHub repo → Settings → Secrets and variables → Actions → 新增同名 secret `CRON_SECRET`(備援排程用)
+3. **設定外部 cron 服務**(主排程):建立一個每 5 分鐘執行的工作,設定為
+   - URL:`https://hsinchu-fab-route.vercel.app/api/cron/collect`
+   - Method:`POST`(route 也接受 GET)
+   - Header:`Authorization: Bearer <跟上面同一組 CRON_SECRET>`
 
-兩件都設定好、觸發一次部署之後,GitHub Actions 就會開始每 5 分鐘寫一批資料進去。可以用
-`GET /api/cron/collect`(帶同一組 Bearer token)手動觸發一次確認有沒有寫入成功。
+   **密鑰只能放在 header,不要用 query string 傳**——網址會留在各種存取紀錄、瀏覽器歷史與 referrer 裡,
+   等於把密鑰散佈出去。所以要挑一個支援自訂 request header 的服務。
+
+**環境變數改了之後一定要重新部署**才會生效:Vercel 是在建置當下把環境變數打包進該次部署的,既有的部署
+不會回頭讀新值。可以用 `GET /api/cron/collect`(帶同一組 Bearer token)手動觸發一次,確認回應是
+`{"status":"ok","fetched":N,"inserted":N,...}` 而不是 401 或 `not-configured`。
 
 ## LINE Bot(骨架,尚未啟用)
 

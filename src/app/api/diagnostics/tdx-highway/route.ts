@@ -21,7 +21,9 @@ export const maxDuration = 60;
  */
 
 const BASE = "https://tdx.transportdata.tw/api/basic";
-const AREA_KEYWORDS = ["新竹", "竹北", "竹東", "香山", "寶山", "湖口", "新豐", "竹南", "頭份", "芎林"];
+// Section names turned out to be mileage-based (台68線_0K+0~1K+280) with no
+// place names in them at all, so an area-keyword filter matched nothing.
+// Geography has to come from the road plus its mileage instead.
 const ROADS_OF_INTEREST = ["台68", "台1線", "台1甲", "台3線", "台15", "台61"];
 
 type Rec = Record<string, unknown>;
@@ -53,9 +55,16 @@ export async function GET() {
   const liveById = new Map<string, Rec>();
   for (const rec of live.records) liveById.set(str(rec.SectionID), rec);
 
-  const inCorridor = sections.records.filter((rec) => {
-    const text = `${str(rec.SectionName)} ${str(rec.RoadSection)} ${str(rec.RoadName)}`;
-    return AREA_KEYWORDS.some((k) => text.includes(k));
+  const inCorridor = sections.records.filter((rec) =>
+    ROADS_OF_INTEREST.some((road) => str(rec.RoadName).includes(road)),
+  );
+  // 台68 first: it runs 南寮 → 竹東 and nowhere else, so every one of its
+  // sections is in this product's corridor by definition — no mileage
+  // guesswork needed. The others are nationwide and need their Hsinchu
+  // mileage range picked out, which is what SectionMile is here to show.
+  inCorridor.sort((a, b) => {
+    const rank = (r: Rec) => (str(r.RoadName).includes("台68") ? 0 : 1);
+    return rank(a) - rank(b) || str(a.SectionName).localeCompare(str(b.SectionName));
   });
 
   const roadTally: Record<string, number> = {};
@@ -66,13 +75,14 @@ export async function GET() {
     }
   }
 
-  const samples = inCorridor.slice(0, 60).map((rec) => {
+  const samples = inCorridor.slice(0, 30).map((rec) => {
     const l = liveById.get(str(rec.SectionID));
     return {
       sectionId: str(rec.SectionID),
       roadName: str(rec.RoadName),
       sectionName: str(rec.SectionName),
       roadSection: str(rec.RoadSection),
+      sectionMile: str(rec.SectionMile),
       // The whole question: does this section actually report a number right now?
       travelTime: l?.TravelTime ?? null,
       travelSpeed: l?.TravelSpeed ?? null,

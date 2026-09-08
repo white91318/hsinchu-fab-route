@@ -20,6 +20,16 @@ import { unwrapRecords } from "@/lib/live/tdx/freeway";
 
 const BASE = "https://tdx.transportdata.tw/api/basic";
 const PROBE_TIMEOUT_MS = 12_000;
+/**
+ * TDX rate-limits harder than its published "50 requests/sec" suggests: nine
+ * back-to-back probes got four answers and then 429 for the rest. Spacing
+ * them out costs a few seconds and is the difference between a report and a
+ * column of 429s that says nothing about the endpoints.
+ */
+const PROBE_GAP_MS = 1_500;
+const RETRY_AFTER_429_MS = 5_000;
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** The roads the product actually models — the whole point of the probe. */
 const TARGET_ROADS = [
@@ -182,8 +192,16 @@ export async function probeTdxCityResources(): Promise<CityProbeReport> {
   // memory ceiling — nine of them decoded at once is the kind of thing that
   // fails only in production.
   const results: ProbeResult[] = [];
-  for (const candidate of CANDIDATES) {
-    results.push(await probe(candidate, token));
+  for (const [index, candidate] of CANDIDATES.entries()) {
+    if (index > 0) await wait(PROBE_GAP_MS);
+    let result = await probe(candidate, token);
+    // One retry, because a 429 tells us about our own request rate and
+    // nothing about whether the resource exists — which is the question.
+    if (result.status === 429) {
+      await wait(RETRY_AFTER_429_MS);
+      result = await probe(candidate, token);
+    }
+    results.push(result);
   }
   return { credentialsConfigured: true, tokenObtained: true, probedAt, results };
 }

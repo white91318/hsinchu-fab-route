@@ -170,7 +170,15 @@ async function probe(candidate: Candidate, token: string): Promise<ProbeResult> 
   }
 }
 
-export async function probeTdxCityResources(): Promise<CityProbeReport> {
+/**
+ * `reverse` exists to tell two very different explanations apart. Four of
+ * these endpoints answered 429 while the first four answered fine — and they
+ * stayed 429 after 1.5s gaps and a 5s retry, which our own request rate
+ * cannot explain. If they succeed when probed first, the 429 is about
+ * cumulative quota; if they 429 wherever they sit in the order, the endpoint
+ * itself is refusing us and the order was a red herring.
+ */
+export async function probeTdxCityResources(reverse = false): Promise<CityProbeReport> {
   const probedAt = new Date().toISOString();
   const creds = readTdxCredentials();
   if (!creds) {
@@ -192,7 +200,8 @@ export async function probeTdxCityResources(): Promise<CityProbeReport> {
   // memory ceiling — nine of them decoded at once is the kind of thing that
   // fails only in production.
   const results: ProbeResult[] = [];
-  for (const [index, candidate] of CANDIDATES.entries()) {
+  const order = reverse ? [...CANDIDATES].reverse() : CANDIDATES;
+  for (const [index, candidate] of order.entries()) {
     if (index > 0) await wait(PROBE_GAP_MS);
     let result = await probe(candidate, token);
     // One retry, because a 429 tells us about our own request rate and

@@ -13,7 +13,9 @@ export const maxDuration = 60;
  * response is public road metadata plus HTTP status codes. It reports whether
  * credentials are configured, never their values.
  */
-export async function GET() {
-  const report = await probeTdxCityResources();
+export async function GET(request: Request) {
+  // ?reverse=1 probes the same endpoints in the opposite order — see cityProbe.ts.
+  const reverse = new URL(request.url).searchParams.get("reverse") === "1";
+  const report = await probeTdxCityResources(reverse);
   return NextResponse.json(report, { headers: { "Cache-Control": "no-store" } });
 }

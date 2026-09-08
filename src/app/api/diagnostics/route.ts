@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { fetchLiveTrafficWithDiagnostics } from "@/lib/live/aggregate";
 import { CONSTRUCTION_LIST_URL } from "@/lib/live/constructionClient";
+import { fetchLineBotInfo } from "@/lib/line/client";
+import { readLineChannelSecret } from "@/lib/line/config";
 import { TDX_TOKEN_URL, readTdxCredentials } from "@/lib/live/tdx/config";
 
 export const dynamic = "force-dynamic";
@@ -44,7 +46,7 @@ async function probeHost(url: string, init?: RequestInit) {
 export async function GET() {
   const creds = readTdxCredentials();
 
-  const [tokenProbe, constructionProbe, live] = await Promise.all([
+  const [tokenProbe, constructionProbe, live, lineBotInfo] = await Promise.all([
     // Deliberately unauthenticated: a 400/401 still proves the host answers,
     // which is the thing we cannot determine from the sandbox.
     probeHost(TDX_TOKEN_URL, {
@@ -61,6 +63,7 @@ export async function GET() {
       },
     }),
     fetchLiveTrafficWithDiagnostics(),
+    fetchLineBotInfo(),
   ]);
 
   return NextResponse.json(
@@ -72,6 +75,15 @@ export async function GET() {
         tokenEndpointProbe: tokenProbe,
         health: live.freeway.health,
         shapeReport: live.freeway.shapeReport ?? null,
+      },
+      line: {
+        // Same contract as tdx.credentialsConfigured: whether the values are
+        // present, never the values themselves.
+        channelSecretConfigured: Boolean(readLineChannelSecret()),
+        // Confirms the access token actually works, and which account it
+        // belongs to — the alternative is finding out it's wrong when the
+        // first real alert silently fails to send.
+        botInfoProbe: lineBotInfo,
       },
       construction: {
         listPageProbe: constructionProbe,

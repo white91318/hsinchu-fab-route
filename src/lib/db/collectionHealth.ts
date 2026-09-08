@@ -48,12 +48,24 @@ export interface CollectionHealth {
     maxMinutes: number | null;
   }>;
   /**
-   * Median travel time by hour of day (Asia/Taipei), summed across sections.
-   * Three weekdays is already enough to see whether the commute peaks PRD
-   * §1.3 claims are real actually show up — and whether they land where
-   * traffic/model.ts currently assumes (08:00, 15:48, 23:30).
+   * Congestion by hour of day (Asia/Taipei). Three weekdays is already enough
+   * to see whether the commute peaks PRD §1.3 claims are real actually show
+   * up, and whether they land where traffic/model.ts currently assumes
+   * (08:00, 15:48, 23:30) — which is the single most valuable thing to learn
+   * early, because the whole product rests on that claim.
+   *
+   * `congestionIndex` is the median of each reading divided by its own
+   * section's median, so 1.0 means "normal for this road" and 1.4 means
+   * "40% slower than this road usually is". Raw minutes can't answer this:
+   * sections here run from 1.2 to 9.3 minutes, so a median across them is
+   * dominated by the mid-length roads and barely moves when one jams.
    */
-  hourlyShape: Array<{ hour: number; samples: number; medianMinutes: number | null }>;
+  hourlyShape: Array<{
+    hour: number;
+    samples: number;
+    congestionIndex: number | null;
+    medianMinutes: number | null;
+  }>;
 }
 
 function num(v: unknown): number | null {
@@ -108,12 +120,26 @@ export async function readCollectionHealth(): Promise<CollectionHealth> {
     ORDER BY samples DESC, section_id
   `) as Array<Record<string, unknown>>;
 
+  // Each reading is normalised against its own section's median before being
+  // aggregated, so a jam on one road actually moves the number instead of
+  // being averaged away against roads of a completely different length.
   const hourRows = (await sql`
+    WITH section_median AS (
+      SELECT
+        section_id,
+        percentile_cont(0.5) WITHIN GROUP (ORDER BY travel_minutes) AS median_minutes
+      FROM traffic_snapshot
+      GROUP BY section_id
+    )
     SELECT
-      EXTRACT(HOUR FROM ts AT TIME ZONE 'Asia/Taipei')::int AS hour,
+      EXTRACT(HOUR FROM t.ts AT TIME ZONE 'Asia/Taipei')::int AS hour,
       COUNT(*)::int AS samples,
-      percentile_cont(0.5) WITHIN GROUP (ORDER BY travel_minutes) AS median_minutes
-    FROM traffic_snapshot
+      percentile_cont(0.5) WITHIN GROUP (
+        ORDER BY t.travel_minutes / NULLIF(m.median_minutes, 0)
+      ) AS congestion_index,
+      percentile_cont(0.5) WITHIN GROUP (ORDER BY t.travel_minutes) AS median_minutes
+    FROM traffic_snapshot t
+    JOIN section_median m ON m.section_id = t.section_id
     GROUP BY hour
     ORDER BY hour
   `) as Array<Record<string, unknown>>;
@@ -142,6 +168,7 @@ export async function readCollectionHealth(): Promise<CollectionHealth> {
     hourlyShape: hourRows.map((r) => ({
       hour: num(r.hour) ?? 0,
       samples: num(r.samples) ?? 0,
+      congestionIndex: num(r.congestion_index),
       medianMinutes: num(r.median_minutes),
     })),
   };

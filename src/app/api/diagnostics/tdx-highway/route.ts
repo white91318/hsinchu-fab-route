@@ -29,6 +29,9 @@ const ROADS_OF_INTEREST = ["台68", "台1線", "台1甲", "台3線", "台15", "�
 type Rec = Record<string, unknown>;
 
 const str = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String(v));
+// RoadSection and SectionMile are nested objects ({Start,End}), which String()
+// turns into "[object Object]" — useless for reading off a section's extent.
+const flat = (v: unknown) => (v && typeof v === "object" ? JSON.stringify(v) : str(v));
 
 async function fetchJson(url: string, token: string): Promise<{ status: number; records: Rec[] }> {
   const res = await fetch(url, {
@@ -81,8 +84,8 @@ export async function GET() {
       sectionId: str(rec.SectionID),
       roadName: str(rec.RoadName),
       sectionName: str(rec.SectionName),
-      roadSection: str(rec.RoadSection),
-      sectionMile: str(rec.SectionMile),
+      roadSection: flat(rec.RoadSection),
+      sectionMile: flat(rec.SectionMile),
       // The whole question: does this section actually report a number right now?
       travelTime: l?.TravelTime ?? null,
       travelSpeed: l?.TravelSpeed ?? null,
@@ -104,6 +107,21 @@ export async function GET() {
         return l != null && l.TravelTime != null;
       }).length,
       sectionsPerRoadOfInterest: roadTally,
+      // Every 台68 section joined to nothing in the live feed while 台15 joined
+      // fine. Two very different explanations — 台68 has no live coverage, or
+      // the live feed keys it under different SectionIDs — and only one of
+      // them leaves the road usable. This is what tells them apart.
+      tai68: {
+        staticSectionIds: sections.records
+          .filter((r) => str(r.RoadName).includes("台68"))
+          .map((r) => str(r.SectionID)),
+        liveSectionIdsMentioning68: live.records
+          .map((r) => str(r.SectionID))
+          .filter((id) => id.slice(0, 6).includes("68"))
+          .slice(0, 20),
+        liveCountMentioning68: live.records.filter((r) => str(r.SectionID).slice(0, 6).includes("68"))
+          .length,
+      },
       samples,
     },
     { headers: { "Cache-Control": "no-store" } },

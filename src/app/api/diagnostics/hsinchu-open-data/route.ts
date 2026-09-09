@@ -27,13 +27,27 @@ export const maxDuration = 60;
  */
 
 const PAGES: Array<{ name: string; url: string; followScripts?: boolean }> = [
-  { name: "新竹市開放資料平臺(首頁)", url: "https://opendata.hccg.gov.tw/" },
-  { name: "新竹市開放資料平臺 API", url: "https://opendata.hccg.gov.tw/api/v3/page" },
-  { name: "新竹市開放資料:易塞車路段資訊", url: "https://opendata.hccg.gov.tw/OpenDataDetail.aspx?n=12&s=18" },
-  { name: "科管局智慧交通(首頁)", url: "https://traffic.sipa.gov.tw/PAGE" },
+  // The city platform itself. Repeated across hosts and over plain HTTP,
+  // because "this one host is down" and "the whole domain refuses traffic
+  // from outside Taiwan" call for completely different responses, and a
+  // single timeout cannot tell them apart.
+  { name: "新竹市開放資料平臺", url: "https://opendata.hccg.gov.tw/" },
+  { name: "新竹市開放資料平臺(HTTP)", url: "http://opendata.hccg.gov.tw/" },
+  { name: "新竹市政府(主網站)", url: "https://www.hccg.gov.tw/" },
+  { name: "新竹市交通處", url: "https://dep-traffic.hccg.gov.tw/" },
+
+  // The national platform mirrors city datasets, and unlike the city's own
+  // servers it is demonstrably reachable from here. If 新竹市's traffic data
+  // is listed nationally, the region problem stops mattering.
+  { name: "data.gov.tw 搜尋:新竹市 路況", url: "https://data.gov.tw/api/v2/rest/dataset?q=%E6%96%B0%E7%AB%B9%E5%B8%82%20%E8%B7%AF%E6%B3%81" },
+  { name: "data.gov.tw 搜尋:新竹市 交通", url: "https://data.gov.tw/api/v2/rest/dataset?q=%E6%96%B0%E7%AB%B9%E5%B8%82%20%E4%BA%A4%E9%80%9A" },
+  { name: "data.gov.tw 搜尋:易塞車", url: "https://data.gov.tw/api/v2/rest/dataset?q=%E6%98%93%E5%A1%9E%E8%BB%8A" },
+
   { name: "科管局智慧交通:即時交通地圖", url: "https://traffic.sipa.gov.tw/PAGE/map/currenttraffic/index/", followScripts: true },
-  { name: "即時路況與停車資訊流通平台", url: "https://traffic.transportdata.tw/", followScripts: true },
 ];
+
+/** Hosts whose certificate chain we want described rather than trusted (see certificateReport). */
+const TLS_INSPECT_HOSTS = ["traffic.sipa.gov.tw"];
 
 /**
  * Some government sites answer a default Node fetch with a reset rather than
@@ -46,7 +60,7 @@ const BROWSER_UA =
 /** Library bundles never hold the site's own data endpoint — following them wastes the probe. */
 const VENDOR_SCRIPT_RE = /(jquery|bootstrap|popper|modernizr|polyfill|analytics|gtag|ga\.js)/i;
 
-const FETCH_TIMEOUT_MS = 12_000;
+const FETCH_TIMEOUT_MS = 20_000;
 const MAX_BYTES = 600_000;
 const GAP_MS = 800;
 
@@ -146,6 +160,63 @@ async function get(url: string): Promise<FetchOutcome> {
   }
 }
 
+/**
+ * Describes the certificate a host presents, without trusting it and without
+ * reading any content over that connection.
+ *
+ * traffic.sipa.gov.tw failed with UNABLE_TO_VERIFY_LEAF_SIGNATURE, which does
+ * not mean the site is untrustworthy — it means the server omitted the
+ * intermediate certificate from the chain it sends, a very common
+ * misconfiguration. The fix is to supply that intermediate ourselves and keep
+ * verification fully on, and to do that we need to know which CA issued the
+ * leaf and where that CA's certificate is published (the AIA extension).
+ *
+ * The socket below is opened only to read the certificate and is destroyed
+ * immediately; nothing is fetched through it. Reading a certificate is not
+ * trusting it, and no request here is ever made with verification disabled.
+ */
+async function certificateReport(host: string) {
+  const tls = await import("node:tls");
+  return new Promise<Record<string, unknown>>((resolve) => {
+    const socket = tls.connect(
+      { host, port: 443, servername: host, rejectUnauthorized: false, timeout: 10_000 },
+      () => {
+        const cert = socket.getPeerCertificate(true) as unknown as Record<string, unknown> & {
+          issuerCertificate?: Record<string, unknown>;
+          infoAccess?: Record<string, string[]>;
+        };
+        const chain: string[] = [];
+        let node: typeof cert | undefined = cert;
+        const seen = new Set<string>();
+        while (node && !seen.has(String(node.fingerprint))) {
+          seen.add(String(node.fingerprint));
+          const subject = node.subject as Record<string, string> | undefined;
+          chain.push(subject?.CN ?? JSON.stringify(subject ?? {}));
+          node = node.issuerCertificate as typeof cert | undefined;
+        }
+        const issuer = cert.issuer as Record<string, string> | undefined;
+        resolve({
+          host,
+          subjectCN: (cert.subject as Record<string, string> | undefined)?.CN,
+          issuerCN: issuer?.CN,
+          issuerO: issuer?.O,
+          validTo: cert.valid_to,
+          chainSent: chain,
+          // Where the missing intermediate can be downloaded from. Certificates
+          // are self-authenticating, so plain HTTP is the normal way to fetch one.
+          caIssuers: cert.infoAccess?.["CA Issuers - URI"] ?? null,
+        });
+        socket.destroy();
+      },
+    );
+    socket.on("timeout", () => {
+      resolve({ host, error: "TLS connect timeout" });
+      socket.destroy();
+    });
+    socket.on("error", (err: Error) => resolve({ host, error: err.message }));
+  });
+}
+
 export async function GET() {
   const results = [];
 
@@ -188,8 +259,13 @@ export async function GET() {
     });
   }
 
+  const certificates = [];
+  for (const host of TLS_INSPECT_HOSTS) {
+    certificates.push(await certificateReport(host));
+  }
+
   return NextResponse.json(
-    { checkedAt: new Date().toISOString(), results },
+    { checkedAt: new Date().toISOString(), results, certificates },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

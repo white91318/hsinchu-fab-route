@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { fetchWithChainRepair } from "@/lib/net/chainRepair";
+
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
@@ -42,8 +44,6 @@ const PAGES: Array<{ name: string; url: string; followScripts?: boolean }> = [
   { name: "data.gov.tw 搜尋:新竹市 路況", url: "https://data.gov.tw/api/v2/rest/dataset?q=%E6%96%B0%E7%AB%B9%E5%B8%82%20%E8%B7%AF%E6%B3%81" },
   { name: "data.gov.tw 搜尋:新竹市 交通", url: "https://data.gov.tw/api/v2/rest/dataset?q=%E6%96%B0%E7%AB%B9%E5%B8%82%20%E4%BA%A4%E9%80%9A" },
   { name: "data.gov.tw 搜尋:易塞車", url: "https://data.gov.tw/api/v2/rest/dataset?q=%E6%98%93%E5%A1%9E%E8%BB%8A" },
-
-  { name: "科管局智慧交通:即時交通地圖", url: "https://traffic.sipa.gov.tw/PAGE/map/currenttraffic/index/", followScripts: true },
 ];
 
 /** Hosts whose certificate chain we want described rather than trusted (see certificateReport). */
@@ -217,6 +217,104 @@ async function certificateReport(host: string) {
   });
 }
 
+/**
+ * data.gov.tw answered "Method not allowed. Must be one of: POST" — the
+ * endpoint is there and reachable, we just asked wrongly. This matters more
+ * than it sounds: the city's own platform refuses connections entirely, so
+ * the national mirror is the only route to a 新竹市 dataset from a server.
+ */
+async function probeDataGovTw() {
+  const attempts: Array<{ method: string; url: string; body?: string }> = [
+    { method: "POST", url: "https://data.gov.tw/api/v2/rest/dataset", body: JSON.stringify({ q: "新竹市 路況" }) },
+    { method: "POST", url: "https://data.gov.tw/api/v2/rest/dataset", body: JSON.stringify({ keyword: "易塞車" }) },
+    { method: "GET", url: "https://data.gov.tw/api/v1/rest/dataset?q=%E6%96%B0%E7%AB%B9%E5%B8%82%20%E8%B7%AF%E6%B3%81" },
+    { method: "GET", url: "https://data.gov.tw/api/v1/rest/dataset/166031" },
+  ];
+
+  const out = [];
+  for (const attempt of attempts) {
+    await wait(GAP_MS);
+    try {
+      const res = await fetch(attempt.url, {
+        method: attempt.method,
+        cache: "no-store",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json",
+          "user-agent": BROWSER_UA,
+        },
+        body: attempt.body,
+      });
+      const text = (await res.text()).slice(0, MAX_BYTES);
+      out.push({
+        method: attempt.method,
+        url: attempt.url,
+        status: res.status,
+        contentType: res.headers.get("content-type"),
+        bytes: text.length,
+        snippet: text.replace(/\s+/g, " ").slice(0, 900),
+      });
+    } catch (err) {
+      out.push({
+        method: attempt.method,
+        url: attempt.url,
+        status: "error" as const,
+        contentType: null,
+        bytes: 0,
+        snippet: err instanceof Error ? err.message : "fetch failed",
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * The Science Park administration's traffic system, reached through the
+ * repaired certificate chain. This is the one host that might carry 園區二路
+ * and 篤行路 — the roads TDX has nothing for.
+ */
+async function probeSipa() {
+  const pageUrl = "https://traffic.sipa.gov.tw/PAGE/map/currenttraffic/index/";
+  try {
+    const page = await fetchWithChainRepair(pageUrl, {
+      headers: { accept: "text/html,*/*", "accept-language": "zh-TW,zh;q=0.9", "user-agent": BROWSER_UA },
+    });
+    const scripts = extractScriptSrcs(page.body, pageUrl).slice(0, 4);
+    const fromScripts = [];
+    for (const src of scripts) {
+      await wait(GAP_MS);
+      try {
+        const js = await fetchWithChainRepair(src, { headers: { "user-agent": BROWSER_UA } });
+        fromScripts.push({ script: src, status: js.status, endpoints: extractEndpoints(js.body).slice(0, 30) });
+      } catch (err) {
+        fromScripts.push({
+          script: src,
+          status: "error" as const,
+          endpoints: [],
+          error: err instanceof Error ? err.message : "fetch failed",
+        });
+      }
+    }
+    return {
+      url: pageUrl,
+      chainRepair: "ok",
+      status: page.status,
+      contentType: page.contentType,
+      bytes: page.body.length,
+      links: extractLinks(page.body, pageUrl).slice(0, 30),
+      endpoints: extractEndpoints(page.body).slice(0, 40),
+      snippet: page.body.replace(/\s+/g, " ").slice(0, 700),
+      fromScripts,
+    };
+  } catch (err) {
+    return {
+      url: pageUrl,
+      chainRepair: "failed",
+      error: err instanceof Error ? err.message : "fetch failed",
+    };
+  }
+}
+
 export async function GET() {
   const results = [];
 
@@ -259,13 +357,16 @@ export async function GET() {
     });
   }
 
+  const dataGovTw = await probeDataGovTw();
+  const sipa = await probeSipa();
+
   const certificates = [];
   for (const host of TLS_INSPECT_HOSTS) {
     certificates.push(await certificateReport(host));
   }
 
   return NextResponse.json(
-    { checkedAt: new Date().toISOString(), results, certificates },
+    { checkedAt: new Date().toISOString(), results, dataGovTw, sipa, certificates },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

@@ -228,6 +228,32 @@ p90),得先累積至少 4 週的歷史路況(§14 M0 的出場條件)。M0 因�
 
 **探測時的坑**:TDX 的限流比它寫的 50 req/sec 嚴得多——九個請求連打會得到四個答案再五個 429,而且**間隔 1.5 秒加重試也一樣**。是把探測順序反過來(`?reverse=1`)才確認 429 是累積配額,不是那些端點不存在。這件事會影響之後收集器要抓幾條路線。
 
+## 新竹市府/科管局的開放資料呢?(2026-09-09 實測)
+
+TDX 對市區道路等於沒有資料之後,下一個要問的是市府自己有沒有。答案是:**有平台,但從伺服器端拿不到**。
+探測在 `/api/diagnostics/hsinchu-open-data`。
+
+| 來源 | 結果 |
+|---|---|
+| `opendata.hccg.gov.tw`(市府開放資料平臺) | **connect timeout,443 跟 80 都是**。不是 TLS 問題也不是 404,是連線根本不被接受 |
+| `www.hccg.gov.tw`、`dep-traffic.hccg.gov.tw` | 403,Cloudflare 人機驗證(`Just a moment...`) |
+| `traffic.sipa.gov.tw`(科管局智慧交通) | TLS 修好之後打得到,但回 **HTTP 555 `Unauthorized Request Blocked`**——WAF 擋掉 |
+| `data.gov.tw` v2 API | **200,但要 API Key**(`ER0001:API Key錯誤: HTTP 標頭沒設定 Authorization Key`)。v1 API 已經 404 |
+
+科管局那條值得單獨說,因為它一開始看起來像「站掛了」,其實不是:它的 leaf 憑證是 TWCA Secure SSL CA 簽的,
+那張根本來就在公開信任清單裡,**是伺服器沒把中間憑證一起送**。瀏覽器會照 leaf 的 AIA 欄位把缺的那張抓回來,
+Node 不會,所以就照瀏覽器的做法做——`src/lib/net/chainRepair.ts` 去 AIA 抓回中間憑證,當成額外 CA 交給 TLS,
+**驗證全開**,鏈一樣必須收斂到本來就信任的根,偽造憑證照樣被擋。沒有用 `rejectUnauthorized: false`,
+那會變成「這台主機的任何憑證都收」,跟修鏈是兩件完全不同的事。
+修完之後才看得到真正的答案:擋我們的是 WAF,不是憑證。
+
+**Cloudflare 驗證和 WAF 的 555 是明確的「不要用機器來」**,所以到此為止,不繞。剩下唯一正當的路是
+**data.gov.tw 的 v2 API + 一把免費 API Key**(平台會員申請)。拿到之後把它放進 `DATA_GOV_TW_API_KEY`
+就能接著查。
+
+先講清楚期望值:「新竹市易塞車路段資訊」聽起來像即時路況,但這類資料集通常是**靜態的易塞路段清單**
+(一張參考表),不是每 5 分鐘更新的旅行時間。真是這樣的話,它對基準線沒有用——這件事等 API Key 到手就能確認。
+
 ## 基準線批次(Baseline)
 
 PRD §9 的 Baseline:每個路段 × 星期幾 × 15 分鐘時段的正常旅行時間分布(p50/p75/p90)。這是「今天跟平常

@@ -27,11 +27,24 @@ export const maxDuration = 60;
  */
 
 const PAGES: Array<{ name: string; url: string; followScripts?: boolean }> = [
+  { name: "新竹市開放資料平臺(首頁)", url: "https://opendata.hccg.gov.tw/" },
   { name: "新竹市開放資料平臺 API", url: "https://opendata.hccg.gov.tw/api/v3/page" },
   { name: "新竹市開放資料:易塞車路段資訊", url: "https://opendata.hccg.gov.tw/OpenDataDetail.aspx?n=12&s=18" },
+  { name: "科管局智慧交通(首頁)", url: "https://traffic.sipa.gov.tw/PAGE" },
   { name: "科管局智慧交通:即時交通地圖", url: "https://traffic.sipa.gov.tw/PAGE/map/currenttraffic/index/", followScripts: true },
   { name: "即時路況與停車資訊流通平台", url: "https://traffic.transportdata.tw/", followScripts: true },
 ];
+
+/**
+ * Some government sites answer a default Node fetch with a reset rather than
+ * a response. Identifying as a browser is how a person reading the same
+ * public page would be seen; nothing here is hidden or authenticated.
+ */
+const BROWSER_UA =
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36";
+
+/** Library bundles never hold the site's own data endpoint — following them wastes the probe. */
+const VENDOR_SCRIPT_RE = /(jquery|bootstrap|popper|modernizr|polyfill|analytics|gtag|ga\.js)/i;
 
 const FETCH_TIMEOUT_MS = 12_000;
 const MAX_BYTES = 600_000;
@@ -54,6 +67,20 @@ function extractEndpoints(text: string): string[] {
   return [...found];
 }
 
+/** In-site links, so a portal page can point at the subpage that does hold data. */
+function extractLinks(html: string, base: string): string[] {
+  const links = new Set<string>();
+  for (const m of html.matchAll(/<a[^>]+href=["']([^"']+)["']/gi)) {
+    try {
+      const resolved = new URL(m[1], base);
+      if (resolved.origin === new URL(base).origin) links.add(resolved.pathname + resolved.search);
+    } catch {
+      // Unresolvable href, nothing to learn from it.
+    }
+  }
+  return [...links];
+}
+
 function extractScriptSrcs(html: string, base: string): string[] {
   const srcs = new Set<string>();
   for (const m of html.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)) {
@@ -61,7 +88,9 @@ function extractScriptSrcs(html: string, base: string): string[] {
       const resolved = new URL(m[1], base);
       // Same-origin only: a third-party bundle is not where this site's own
       // data endpoint lives, and fetching them widens the probe for nothing.
-      if (resolved.origin === new URL(base).origin) srcs.add(resolved.toString());
+      if (resolved.origin === new URL(base).origin && !VENDOR_SCRIPT_RE.test(resolved.pathname)) {
+        srcs.add(resolved.toString());
+      }
     } catch {
       // A src we can't resolve tells us nothing; skip it.
     }
@@ -75,6 +104,8 @@ interface FetchOutcome {
   bytes: number;
   body: string;
   error?: string;
+  causeCode?: string;
+  causeMessage?: string;
 }
 
 async function get(url: string): Promise<FetchOutcome> {
@@ -84,18 +115,31 @@ async function get(url: string): Promise<FetchOutcome> {
     const res = await fetch(url, {
       signal: controller.signal,
       cache: "no-store",
-      headers: { accept: "text/html,application/json,*/*" },
+      headers: {
+        accept: "text/html,application/json,*/*",
+        "accept-language": "zh-TW,zh;q=0.9",
+        "user-agent": BROWSER_UA,
+      },
     });
     const raw = await res.text();
     const body = raw.slice(0, MAX_BYTES);
     return { status: res.status, contentType: res.headers.get("content-type"), bytes: raw.length, body };
   } catch (err) {
+    // Node collapses every network failure into "fetch failed"; the cause is
+    // where the actual answer lives — a TLS rejection, a DNS miss, a refused
+    // connection and a timeout need completely different responses, and the
+    // top-level message cannot tell them apart.
+    const cause = (err as { cause?: unknown } | undefined)?.cause as
+      | { code?: string; message?: string }
+      | undefined;
     return {
       status: "error",
       contentType: null,
       bytes: 0,
       body: "",
       error: err instanceof Error ? err.message : "fetch failed",
+      causeCode: cause?.code,
+      causeMessage: cause?.message,
     };
   } finally {
     clearTimeout(timer);
@@ -114,7 +158,7 @@ export async function GET() {
     // the HTML, so for those pages follow a couple of same-origin scripts.
     const fromScripts: Array<{ script: string; status: number | "error"; endpoints: string[] }> = [];
     if (page.followScripts && outcome.status === 200) {
-      for (const src of extractScriptSrcs(outcome.body, page.url).slice(0, 3)) {
+      for (const src of extractScriptSrcs(outcome.body, page.url).slice(0, 4)) {
         await wait(GAP_MS);
         const scriptOutcome = await get(src);
         fromScripts.push({
@@ -132,6 +176,10 @@ export async function GET() {
       contentType: outcome.contentType,
       bytes: outcome.bytes,
       error: outcome.error,
+      causeCode: outcome.causeCode,
+      causeMessage: outcome.causeMessage,
+      // Where to look next when a portal page itself carries no data call.
+      links: extractLinks(outcome.body, page.url).slice(0, 25),
       endpoints: endpoints.slice(0, 40),
       // Enough of the response to tell a real dataset page from a login wall
       // or an error page, which look identical in a status code alone.
